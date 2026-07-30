@@ -1,0 +1,30 @@
+{
+  "name": "@csa/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@csa/db": "workspace:*",
+    "@csa/shared": "workspace:*",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^10.1.0",
+    "@node-rs/argon2": "^2.0.2",
+    "dotenv": "^16.6.1",
+    "drizzle-orm": "^0.44.7",
+    "fastify": "^5.6.1",
+    "jose": "^5.10.0",
+    "pino-pretty": "^13.1.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

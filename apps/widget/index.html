@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Widget dev harness</title>
+  </head>
+  <body>
+    <p style="font-family: system-ui; padding: 20px">
+      This page simulates a third-party site embedding the widget during local development.
+    </p>
+    <script>
+      window.CSAWidgetConfig = {
+        apiKey: "REPLACE_WITH_A_REAL_WORKSPACE_API_KEY",
+        apiUrl: "http://localhost:4000",
+      };
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

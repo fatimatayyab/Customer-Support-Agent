@@ -1,0 +1,23 @@
+{
+  "name": "ai-customer-support-platform",
+  "private": true,
+  "version": "0.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "sharp"]
+  },
+  "scripts": {
+    "dev:api": "pnpm --filter @csa/api dev",
+    "dev:dashboard": "pnpm --filter @csa/dashboard dev",
+    "dev:widget": "pnpm --filter @csa/widget dev",
+    "db:generate": "pnpm --filter @csa/db generate",
+    "db:migrate": "pnpm --filter @csa/db migrate",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  }
+}
