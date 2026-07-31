@@ -1,26 +1,115 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { identifyWorkspace, type IdentifiedWorkspace } from "./api.js";
+import { ChatPanel } from "./ChatPanel.js";
 import type { WidgetConfig } from "./config.js";
+import { getStoredConversationId, getStoredCustomerId, storeConversation } from "./storage.js";
+import { ChatConnection, type IncomingEvent, type WireMessage } from "./ws-client.js";
 
-type Status =
+type IdentifyStatus =
   | { state: "loading" }
   | { state: "ready"; workspace: IdentifiedWorkspace }
   | { state: "error"; message: string };
 
 export function Widget({ config }: { config: WidgetConfig }) {
-  const [status, setStatus] = useState<Status>({ state: "loading" });
+  const [identify, setIdentify] = useState<IdentifyStatus>({ state: "loading" });
+  const [open, setOpen] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [messages, setMessages] = useState<WireMessage[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [typing, setTyping] = useState(false);
+  const connectionRef = useRef<ChatConnection | null>(null);
 
   useEffect(() => {
     identifyWorkspace(config)
-      .then((workspace) => setStatus({ state: "ready", workspace }))
-      .catch((error: Error) => setStatus({ state: "error", message: error.message }));
+      .then((workspace) => setIdentify({ state: "ready", workspace }))
+      .catch((error: Error) => setIdentify({ state: "error", message: error.message }));
   }, [config]);
 
+  // Connects lazily on first open, not on identify - most site visitors
+  // never click the bubble, and every open connection is a cost
+  // (server-side memory, and eventually rate-limit budget) the platform
+  // shouldn't pay for someone who never engages.
+  useEffect(() => {
+    if (!open || connectionRef.current) {
+      return;
+    }
+
+    const connection = new ChatConnection(config);
+    connectionRef.current = connection;
+
+    const unsubscribe = connection.onEvent((event: IncomingEvent) => {
+      switch (event.type) {
+        case "conversation:initiated":
+          setConversationId(event.payload.conversation.id);
+          setMessages(event.payload.messages);
+          storeConversation(event.payload.customer.id, event.payload.conversation.id);
+          break;
+        case "message:receive":
+          setMessages((previous) => [...previous, event.payload]);
+          break;
+        case "typing:start":
+          setTyping(true);
+          break;
+        case "typing:stop":
+          setTyping(false);
+          break;
+      }
+    });
+
+    connection
+      .connect()
+      .then(() => {
+        setConnected(true);
+        connection.send("conversation:initiate", {
+          customerId: getStoredCustomerId() ?? undefined,
+          conversationId: getStoredConversationId() ?? undefined,
+        });
+      })
+      .catch(() => setConnected(false));
+
+    return unsubscribe;
+  }, [open, config]);
+
+  function handleSend(content: string) {
+    if (!conversationId) {
+      return;
+    }
+    connectionRef.current?.send("message:send", { conversationId, content });
+  }
+
+  function handleTyping(isTyping: boolean) {
+    if (!conversationId) {
+      return;
+    }
+    connectionRef.current?.send(isTyping ? "typing:start" : "typing:stop", { conversationId });
+  }
+
+  if (identify.state !== "ready") {
+    return (
+      <div class="bubble">
+        {identify.state === "loading" && <span>Loading...</span>}
+        {identify.state === "error" && <span class="error">{identify.message}</span>}
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <button type="button" class="bubble bubble-button" onClick={() => setOpen(true)}>
+        Chat with {identify.workspace.name}
+      </button>
+    );
+  }
+
   return (
-    <div class="bubble">
-      {status.state === "loading" && <span>Loading...</span>}
-      {status.state === "ready" && <span>Chat with {status.workspace.name}</span>}
-      {status.state === "error" && <span class="error">{status.message}</span>}
-    </div>
+    <ChatPanel
+      workspaceName={identify.workspace.name}
+      connected={connected}
+      messages={messages}
+      typing={typing}
+      onSend={handleSend}
+      onTyping={handleTyping}
+      onClose={() => setOpen(false)}
+    />
   );
 }

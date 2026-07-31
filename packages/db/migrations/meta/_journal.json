@@ -15,6 +15,13 @@
       "when": 1785409032165,
       "tag": "0001_grant_auth_resolver",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785414019848,
+      "tag": "0002_gifted_lockheed",
+      "breakpoints": true
     }
   ]
 }

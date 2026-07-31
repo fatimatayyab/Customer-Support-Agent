@@ -1,9 +1,11 @@
 import cookie from "@fastify/cookie";
 import cors, { type FastifyCorsOptions } from "@fastify/cors";
+import websocket from "@fastify/websocket";
 import fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { env } from "./config/env.js";
 import { errorHandler } from "./error-handler.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
+import { widgetRealtimeRoutes } from "./modules/realtime/widget-ws.routes.js";
 import { identifyRoutes } from "./modules/workspace-identification/identify.routes.js";
 import { workspaceRoutes } from "./modules/workspaces/workspace.routes.js";
 
@@ -45,12 +47,14 @@ export async function buildApp(): Promise<FastifyInstance> {
       callback(null, corsOptionsFor(request));
     },
   });
+  app.register(websocket);
 
   app.get("/health", async () => ({ status: "ok" }));
 
   app.register(authRoutes);
   app.register(workspaceRoutes);
   app.register(identifyRoutes);
+  app.register(widgetRealtimeRoutes);
 
   app.setErrorHandler(errorHandler);
 
