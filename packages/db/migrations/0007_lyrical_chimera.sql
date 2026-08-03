@@ -1,0 +1,1 @@
+CREATE INDEX "conversations_workspace_id_updated_at_idx" ON "conversations" USING btree ("workspace_id","updated_at");

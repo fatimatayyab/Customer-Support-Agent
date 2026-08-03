@@ -5,7 +5,9 @@ import fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { env } from "./config/env.js";
 import { errorHandler } from "./error-handler.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
+import { conversationRoutes } from "./modules/conversations/conversation.routes.js";
 import { knowledgeRoutes } from "./modules/knowledge/knowledge.routes.js";
+import { agentConsoleRealtimeRoutes } from "./modules/realtime/agent-console-ws.routes.js";
 import { widgetRealtimeRoutes } from "./modules/realtime/widget-ws.routes.js";
 import { identifyRoutes } from "./modules/workspace-identification/identify.routes.js";
 import { workspaceRoutes } from "./modules/workspaces/workspace.routes.js";
@@ -57,6 +59,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.register(identifyRoutes);
   app.register(widgetRealtimeRoutes);
   app.register(knowledgeRoutes);
+  app.register(conversationRoutes);
+  app.register(agentConsoleRealtimeRoutes);
 
   app.setErrorHandler(errorHandler);
 

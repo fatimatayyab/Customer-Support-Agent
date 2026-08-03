@@ -4,6 +4,7 @@ export * from "./workspace-api-keys.js";
 export * from "./customers.js";
 export * from "./conversations.js";
 export * from "./messages.js";
+export * from "./conversation-notes.js";
 export * from "./knowledge-sources.js";
 export * from "./knowledge-chunks.js";
 export * from "./vector-type.js";

@@ -19,3 +19,12 @@ export async function getUserByEmail(scopedDb: ScopedDb, workspaceId: string, em
     .limit(1);
   return user ?? null;
 }
+
+export async function getUserById(scopedDb: ScopedDb, workspaceId: string, id: string) {
+  const [user] = await scopedDb
+    .select()
+    .from(users)
+    .where(and(eq(users.workspaceId, workspaceId), eq(users.id, id)))
+    .limit(1);
+  return user ?? null;
+}

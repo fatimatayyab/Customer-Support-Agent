@@ -63,8 +63,22 @@ export interface AiReplyResult {
   finishReason: string;
 }
 
+export interface SummarizeInput {
+  workspaceName: string;
+  history: ConversationTurn[];
+}
+
+export interface SummarizeResult {
+  summary: string;
+  provider: string;
+  model: string;
+  promptVersion: number;
+  usage: AiUsage;
+}
+
 export interface AiProvider {
   generateReply(input: GenerateReplyInput): Promise<AiReplyResult>;
+  summarize(input: SummarizeInput): Promise<SummarizeResult>;
 }
 
 // Shared across providers rather than one class per provider - the

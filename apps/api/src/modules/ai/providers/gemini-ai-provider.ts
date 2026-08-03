@@ -1,6 +1,13 @@
 import { FunctionCallingConfigMode, GoogleGenAI } from "@google/genai";
 import { env } from "../../../config/env.js";
-import { AiProviderNotConfiguredError, type AiProvider, type AiReplyResult, type GenerateReplyInput } from "../ai-provider.js";
+import {
+  AiProviderNotConfiguredError,
+  type AiProvider,
+  type AiReplyResult,
+  type GenerateReplyInput,
+  type SummarizeInput,
+  type SummarizeResult,
+} from "../ai-provider.js";
 import { MAX_OUTPUT_TOKENS } from "../ai.config.js";
 import {
   buildSystemPrompt,
@@ -11,6 +18,7 @@ import {
   RESPOND_TO_CUSTOMER_TOOL_NAME,
   type RespondToCustomerToolInput,
 } from "../prompts/support-reply.prompt.js";
+import { buildSummarizeSystemPrompt, buildSummarizeUserContent, SUMMARIZE_PROMPT_VERSION } from "../prompts/summarize-conversation.prompt.js";
 
 // Free-tier friendly - the default AI_PROVIDER for local/dev work
 // specifically to avoid depending on a paid API before it's needed.
@@ -98,6 +106,35 @@ export class GeminiAiProvider implements AiProvider {
         outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
       },
       finishReason: response.candidates?.[0]?.finishReason ?? "unknown",
+    };
+  }
+
+  async summarize(input: SummarizeInput): Promise<SummarizeResult> {
+    const client = this.getClient();
+
+    const response = await client.models.generateContent({
+      model: MODEL,
+      contents: buildSummarizeUserContent(input.history),
+      config: {
+        systemInstruction: buildSummarizeSystemPrompt(input.workspaceName),
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+      },
+    });
+
+    const text = response.text;
+    if (!text) {
+      throw new Error("Gemini did not return text for summarize.");
+    }
+
+    return {
+      summary: text.trim(),
+      provider: "gemini",
+      model: response.modelVersion ?? MODEL,
+      promptVersion: SUMMARIZE_PROMPT_VERSION,
+      usage: {
+        inputTokens: response.usageMetadata?.promptTokenCount ?? 0,
+        outputTokens: response.usageMetadata?.candidatesTokenCount ?? 0,
+      },
     };
   }
 }

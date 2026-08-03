@@ -1,6 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env } from "../../../config/env.js";
-import { AiProviderNotConfiguredError, type AiProvider, type AiReplyResult, type GenerateReplyInput } from "../ai-provider.js";
+import {
+  AiProviderNotConfiguredError,
+  type AiProvider,
+  type AiReplyResult,
+  type GenerateReplyInput,
+  type SummarizeInput,
+  type SummarizeResult,
+} from "../ai-provider.js";
 import { MAX_OUTPUT_TOKENS } from "../ai.config.js";
 import {
   buildSystemPrompt,
@@ -11,6 +18,7 @@ import {
   RESPOND_TO_CUSTOMER_TOOL_NAME,
   type RespondToCustomerToolInput,
 } from "../prompts/support-reply.prompt.js";
+import { buildSummarizeSystemPrompt, buildSummarizeUserContent, SUMMARIZE_PROMPT_VERSION } from "../prompts/summarize-conversation.prompt.js";
 
 const MODEL = "claude-haiku-4-5-20251001";
 
@@ -82,6 +90,33 @@ export class AnthropicAiProvider implements AiProvider {
         outputTokens: response.usage.output_tokens,
       },
       finishReason: response.stop_reason ?? "unknown",
+    };
+  }
+
+  async summarize(input: SummarizeInput): Promise<SummarizeResult> {
+    const client = this.getClient();
+
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      system: buildSummarizeSystemPrompt(input.workspaceName),
+      messages: [{ role: "user", content: buildSummarizeUserContent(input.history) }],
+    });
+
+    const textBlock = response.content.find((block): block is Anthropic.TextBlock => block.type === "text");
+    if (!textBlock) {
+      throw new Error("Claude did not return a text block for summarize.");
+    }
+
+    return {
+      summary: textBlock.text.trim(),
+      provider: "anthropic",
+      model: response.model,
+      promptVersion: SUMMARIZE_PROMPT_VERSION,
+      usage: {
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+      },
     };
   }
 }

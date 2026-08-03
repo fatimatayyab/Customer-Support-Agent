@@ -1,5 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
-import { messages, type ScopedDb } from "@csa/db";
+import { messages, users, type ScopedDb } from "@csa/db";
 import { assertDefined } from "../../assert.js";
 
 // Extensible on purpose - only 'ai' messages populate this today, but
@@ -16,7 +16,10 @@ export interface AiMessageMetadata {
   finishReason: string;
 }
 
-type NewMessage = Pick<typeof messages.$inferInsert, "workspaceId" | "conversationId" | "senderType" | "content"> & {
+type NewMessage = Pick<
+  typeof messages.$inferInsert,
+  "workspaceId" | "conversationId" | "senderType" | "content" | "senderUserId"
+> & {
   metadata?: AiMessageMetadata;
 };
 
@@ -25,10 +28,26 @@ export async function insertMessage(scopedDb: ScopedDb, params: NewMessage) {
   return assertDefined(message, "insertMessage: INSERT ... RETURNING produced no row.");
 }
 
+// Joins the sender's name for 'agent' messages (history reads "Sarah:",
+// not "agent:") - used by both the Orchestrator's AI-context loading
+// and the Agent Console's history view, rather than two near-identical
+// functions. RLS on `users` composes correctly here since this always
+// runs inside the same workspace-scoped transaction.
 export async function listMessages(scopedDb: ScopedDb, workspaceId: string, conversationId: string) {
   return scopedDb
-    .select()
+    .select({
+      id: messages.id,
+      workspaceId: messages.workspaceId,
+      conversationId: messages.conversationId,
+      senderType: messages.senderType,
+      senderUserId: messages.senderUserId,
+      senderName: users.name,
+      content: messages.content,
+      metadata: messages.metadata,
+      createdAt: messages.createdAt,
+    })
     .from(messages)
+    .leftJoin(users, eq(messages.senderUserId, users.id))
     .where(and(eq(messages.conversationId, conversationId), eq(messages.workspaceId, workspaceId)))
     .orderBy(asc(messages.createdAt));
 }

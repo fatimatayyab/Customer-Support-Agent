@@ -1,13 +1,17 @@
 import { sql } from "drizzle-orm";
 import { index, jsonb, pgEnum, pgPolicy, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { conversations } from "./conversations.js";
+import { users } from "./users.js";
 import { workspaces } from "./workspaces.js";
 
-// Types match 04_Domain_Model.md exactly. sender_user_id (to identify
-// which agent sent an 'agent' message) and attachments are deliberately
-// deferred until Phase 4 (Agent Console) actually needs them - nullable
-// columns are cheap to add then, and nothing in this phase produces
-// that data.
+// Types match 04_Domain_Model.md exactly. Internal agent-to-agent notes
+// are NOT a message type - they live in conversation-notes.ts, a
+// separate table. Reusing this enum for notes would mean every current
+// and future query/broadcast against messages has to remember to
+// exclude them, or a note leaks straight to the customer's widget. A
+// separate table makes that structurally impossible instead of relying
+// on discipline. Attachments are still deferred - no phase produces
+// that data yet.
 export const messageSenderTypeEnum = pgEnum("message_sender_type", ["customer", "agent", "system", "ai"]);
 
 export const messages = pgTable(
@@ -21,6 +25,10 @@ export const messages = pgTable(
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
     senderType: messageSenderTypeEnum("sender_type").notNull(),
+    // Only populated for sender_type = 'agent' - which specific user sent
+    // it. SET NULL on user deletion so message history survives a
+    // departed agent's account being removed.
+    senderUserId: uuid("sender_user_id").references(() => users.id, { onDelete: "set null" }),
     content: text("content").notNull(),
     // Sparse by design - only 'ai' messages populate this today (provider,
     // model, confidence, citations, token usage, finish reason). Nullable

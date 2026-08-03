@@ -1,5 +1,5 @@
 import { env } from "../../config/env.js";
-import type { AiProvider, AiReplyResult, GenerateReplyInput } from "./ai-provider.js";
+import type { AiProvider, AiReplyResult, GenerateReplyInput, SummarizeInput, SummarizeResult } from "./ai-provider.js";
 import { AnthropicAiProvider } from "./providers/anthropic-ai-provider.js";
 import { GeminiAiProvider } from "./providers/gemini-ai-provider.js";
 
@@ -24,4 +24,8 @@ export function generateSupportReply(input: GenerateReplyInput): Promise<AiReply
   return aiProvider.generateReply(input);
 }
 
-export type { AiReplyResult, ConversationTurn, Citation, RetrievedContext } from "./ai-provider.js";
+export function summarizeConversationHistory(input: SummarizeInput): Promise<SummarizeResult> {
+  return aiProvider.summarize(input);
+}
+
+export type { AiReplyResult, ConversationTurn, Citation, RetrievedContext, SummarizeResult } from "./ai-provider.js";

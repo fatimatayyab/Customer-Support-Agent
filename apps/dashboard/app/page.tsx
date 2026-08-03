@@ -76,6 +76,9 @@ export default function DashboardHome() {
           </p>
         </div>
         <div className="flex items-center gap-4">
+          <Link href="/conversations" className="text-sm text-slate-500 underline">
+            Conversations
+          </Link>
           <Link href="/knowledge" className="text-sm text-slate-500 underline">
             Knowledge
           </Link>
