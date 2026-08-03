@@ -304,3 +304,39 @@ Reversing one of these is fine — but it should be a deliberate call with a sta
 3. `pnpm docker:up`, confirm Postgres (port **5433**) and Redis are healthy before assuming DB-dependent work will run.
 4. `pnpm -r run typecheck` as a baseline sanity check before making changes.
 5. If continuing knowledge/RAG work, confirm `VOYAGE_API_KEY` is set locally — ingestion/search fail gracefully but visibly without it.
+
+## 24. Project Context Loading
+
+Do not reread the entire documentation at the beginning of every task.
+
+Choose the smallest amount of context needed.
+
+Use these guidelines:
+
+- For feature implementation:
+  Read only the documents directly related to that feature plus the relevant source code.
+
+- For architectural changes:
+  Read the affected architecture documents before making changes.
+
+- For bug fixes:
+  Read only the relevant code and supporting documentation.
+
+- Do not reread docs that have already been incorporated into the implementation unless you suspect they have changed or there is conflicting information.
+
+- Trust previous architectural decisions recorded in CLAUDE.md and docs/07_Phase_Execution_Log.md.
+
+If additional context becomes necessary while implementing, load it incrementally instead of reading every document first.
+
+## 25. Documentation Reading Policy
+
+Documentation is the source of truth, but it should be loaded on demand.
+
+Avoid repeatedly reading all project documents in every session.
+
+Read only:
+- documents relevant to the current phase
+- documents related to the feature being modified
+- execution logs when continuing previous work
+
+Only perform a full documentation review when explicitly requested by the user or before a major architectural redesign.
