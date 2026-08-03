@@ -12,6 +12,10 @@ const envSchema = z.object({
   DASHBOARD_ORIGIN: z.string().url(),
   SESSION_JWT_SECRET: z.string().min(32),
   REDIS_URL: z.string().url(),
+  // Optional so the API can boot without it - ingestion/search requests
+  // fail with a clear "not configured" error until it's set, rather
+  // than the whole app refusing to start over a feature not yet in use.
+  VOYAGE_API_KEY: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

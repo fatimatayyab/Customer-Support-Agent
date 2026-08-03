@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgPolicy, pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, pgPolicy, pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
 import { workspaces } from "./workspaces.js";
 
 // Anonymous by design in Phase 1: no name/email/tags yet (04_Domain_Model.md
@@ -16,6 +16,7 @@ export const customers = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    index("customers_workspace_id_idx").on(table.workspaceId),
     pgPolicy("customers_tenant_isolation", {
       for: "all",
       using: sql`${table.workspaceId} = current_setting('app.workspace_id', true)::uuid`,

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgEnum, pgPolicy, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, pgEnum, pgPolicy, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { conversations } from "./conversations.js";
 import { workspaces } from "./workspaces.js";
 
@@ -25,6 +25,11 @@ export const messages = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    index("messages_workspace_id_idx").on(table.workspaceId),
+    // Matches listMessages' actual query shape (WHERE conversation_id = ...
+    // ORDER BY created_at) so history retrieval doesn't scan every message
+    // in the workspace to find one conversation's.
+    index("messages_conversation_id_created_at_idx").on(table.conversationId, table.createdAt),
     pgPolicy("messages_tenant_isolation", {
       for: "all",
       using: sql`${table.workspaceId} = current_setting('app.workspace_id', true)::uuid`,

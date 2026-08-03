@@ -1,6 +1,7 @@
 "use client";
 
 import type { SessionUser } from "@csa/shared";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
@@ -74,9 +75,14 @@ export default function DashboardHome() {
             {session.user.email} · {session.user.role}
           </p>
         </div>
-        <button onClick={handleLogout} className="text-sm text-slate-500 underline">
-          Log out
-        </button>
+        <div className="flex items-center gap-4">
+          <Link href="/knowledge" className="text-sm text-slate-500 underline">
+            Knowledge
+          </Link>
+          <button onClick={handleLogout} className="text-sm text-slate-500 underline">
+            Log out
+          </button>
+        </div>
       </div>
 
       <section>

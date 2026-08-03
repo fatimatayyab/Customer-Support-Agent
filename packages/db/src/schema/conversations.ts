@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { jsonb, pgEnum, pgPolicy, pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, jsonb, pgEnum, pgPolicy, pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
 import { customers } from "./customers.js";
 import { workspaces } from "./workspaces.js";
 
@@ -31,6 +31,7 @@ export const conversations = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    index("conversations_workspace_id_idx").on(table.workspaceId),
     pgPolicy("conversations_tenant_isolation", {
       for: "all",
       using: sql`${table.workspaceId} = current_setting('app.workspace_id', true)::uuid`,

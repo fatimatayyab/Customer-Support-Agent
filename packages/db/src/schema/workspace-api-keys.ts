@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgPolicy, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { index, pgPolicy, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { workspaces } from "./workspaces.js";
 
 // Only a salted hash of the key is ever stored. keyPrefix is a short,
@@ -33,6 +33,10 @@ export const workspaceApiKeys = pgTable(
     // key itself is already a high-entropy random secret, so a fast,
     // uniquely-indexed hash is the correct (and standard) lookup strategy.
     uniqueIndex("workspace_api_keys_hash_unique").on(table.keyHash),
+    // Every RLS policy and every app-layer query filters on workspace_id -
+    // without this, listing/revoking a workspace's own keys is a full
+    // table scan once other workspaces have keys too.
+    index("workspace_api_keys_workspace_id_idx").on(table.workspaceId),
     pgPolicy("workspace_api_keys_tenant_isolation", {
       for: "all",
       using: sql`${table.workspaceId} = current_setting('app.workspace_id', true)::uuid`,

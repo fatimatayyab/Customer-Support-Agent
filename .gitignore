@@ -5,6 +5,7 @@ dist/
 build/
 .next/
 .turbo/
+*.tsbuildinfo
 
 .env
 .env.local
@@ -25,3 +26,6 @@ Thumbs.db
 .claude/
 
 coverage/
+
+# Local-only reference doc, not part of the shared repo
+docs/Developer_Onboarding_Walkthrough.md

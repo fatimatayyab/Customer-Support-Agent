@@ -22,6 +22,20 @@
       "when": 1785414019848,
       "tag": "0002_gifted_lockheed",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785501689475,
+      "tag": "0003_overconfident_imperial_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785732093868,
+      "tag": "0004_fine_lucky_pierre",
+      "breakpoints": true
     }
   ]
 }

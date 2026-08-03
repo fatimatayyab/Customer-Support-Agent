@@ -57,3 +57,44 @@
 
 - CLI WebSocket smoke test: ticket issuance → connect → `conversation:initiate` → `message:send` → `message:receive` round trip, confirmed against the real API and database.
 - Browser verification via Playwright: two tabs on the same simulated host-page origin, sharing `localStorage`, both connect to the *same* conversation; a message sent from either tab appears live in both; typing in one tab shows the indicator in the other. Zero console errors, zero failed requests.
+
+---
+
+## Phase 2 — Knowledge & RAG
+
+**Status:** ✅ Completed & Verified
+
+### Key Deliverables Built
+
+- Drizzle schemas + RLS for `knowledge_sources` and `knowledge_chunks`, following the same `withWorkspaceContext()` pattern as every prior table.
+- A `vector` column type (`packages/db/src/schema/vector-type.ts`) via Drizzle's `customType` — this version of Drizzle has no first-class pgvector support — plus an HNSW index with `vector_cosine_ops` on `knowledge_chunks.embedding`.
+- `EmbeddingProvider` interface (`apps/api/src/modules/knowledge/embedding-provider.ts`) with a `VoyageEmbeddingProvider` implementation (`voyage-3-lite`, 512 dimensions) — mirrors the PRS's "AI provider-independent" stance for the generation layer, applied to embeddings.
+- A simple paragraph-aware chunker (target size + overlap, character-based, no tokenizer dependency).
+- `knowledge.service.ts`: ingestion (`createKnowledgeSource`) and retrieval (`searchKnowledge`), both dashboard-facing (session-authenticated) — **not** wired into the live widget chat yet. That combination (retrieval + generation) is Phase 3's job.
+- Dashboard Knowledge page: add a plain-text/FAQ source, see status update live via polling, run a search and see ranked results with similarity scores.
+
+### Decisions Made During Implementation
+
+- **Embedding provider: Voyage AI (`voyage-3-lite`, 512 dims)**, confirmed with the user before implementing — Anthropic has no embeddings API of its own and explicitly recommends Voyage for RAG use cases, keeping the AI stack aligned with the Claude-first strategy in `00_Product_Requirement_Specification.md` rather than adding an unrelated second vendor (e.g. OpenAI) for embeddings alone.
+- **Ingestion scope: `plain_text` and `faq` only.** `pdf`, `docx`, `website` exist in the `knowledge_source_type` enum (per `04_Domain_Model.md`) so the schema won't need to change later, but the service rejects them for now (`UnsupportedSourceTypeError`) rather than pretending to support them. Matches the original Phase 2 scoping (start with text, defer file parsing and crawling).
+- **Processing is in-process background work, not a blocking request or a real job queue.** `createKnowledgeSource` returns immediately after inserting the source row (`status: pending`); chunking + embedding happen in an un-awaited call, updating status to `processing` → `completed`/`failed`. The dashboard polls for status. Tradeoff: an API restart mid-processing leaves a source stuck in `processing` until manually retried — acceptable for small text sources today; a real queue with retries becomes worth the complexity once pdf/website ingestion makes this slower or higher-volume.
+- **Retrieval is a standalone, dashboard-testable capability, not wired into the chat yet.** `SupportOrchestrator` was deliberately not touched this phase — combining retrieval with generation is Phase 3's responsibility, and wiring it in early would mean building it twice.
+- **`EmbeddingProviderNotConfiguredError` is a proper `AppError` (503),** not a generic thrown `Error` — knowledge routes are dashboard/admin-only (not customer-facing), so surfacing "set VOYAGE_API_KEY" directly is more useful than collapsing it to a generic 500.
+
+### Verified
+
+- Real end-to-end run against the live Voyage API (once the user provided a key): created two topically distinct sources (Refund Policy, Shipping FAQ), both reached `completed`, and cross-queried each — "does express shipping cost extra?" ranked Shipping FAQ first (0.541 similarity) over Refund Policy (0.250); "can I get my money back?" ranked Refund Policy first (0.386) over Shipping FAQ (0.132). Confirms the embeddings are actually semantically discriminative, not just returning whatever exists.
+- Tenant isolation re-confirmed on the new tables: Beta Co's `/knowledge/sources` and `/knowledge/search` both return empty against Acme's data.
+- Dashboard Knowledge page browser-verified via Playwright: added a third source through the UI, watched it move from `pending` through the polling loop to `completed`, then searched and got the correct top result with its similarity score displayed. Zero console errors, zero failed requests.
+
+### Pre-Commit Architecture Review
+
+Before committing, a final review against long-term maintainability, scalability, security, tenant isolation, performance, extensibility, and Engineering Bible/System Architecture consistency surfaced three issues worth fixing immediately (project still small, all cheap to fix now):
+
+1. **Missing `workspace_id` indexes.** A direct catalog check found `conversations`, `messages`, `customers`, `knowledge_sources`, `knowledge_chunks`, and `workspace_api_keys` had no index touching `workspace_id` at all beyond the primary key - every RLS policy and most app queries filter on it. Fixed by adding a plain `workspace_id` index to each, plus composite indexes matching the actual query shapes already in the code (`knowledge_sources`: `(workspace_id, created_at)`; `messages`: `(conversation_id, created_at)`). This was a pre-existing gap since Phase 0/1, not new to Phase 2, but Phase 2 added two more affected tables and was the natural point to close it everywhere in one pass.
+2. **No role check on `/knowledge/*` mutation routes.** `workspace.routes.ts` established the pattern (API key management gated to `owner`/`administrator`); `knowledge.routes.ts` didn't follow it, meaning any authenticated role including `support_agent` could create/delete knowledge sources. Fixed by extracting the previously-duplicated inline guard into a shared `requireRole()` helper (`apps/api/src/modules/auth/require-role.ts`), used by both `workspace.routes.ts` (refactored) and the new `knowledge.routes.ts` guards on create/delete. Search stays open to all authenticated roles - it's read-only, and agents may want it to help customers. Verified directly: a temporary `support_agent` test account got a 403 on create, a 200 on search; the existing `owner` flow regression-checked clean.
+3. **No batching against the embedding provider's request limits.** The dashboard's own `content` field allows up to 200,000 characters, which can chunk into ~250 texts sent in one Voyage API call - reachable today via a single long paste, not just a hypothetical future PDF. Fixed by splitting `embed()` into sequential sub-batches (`MAX_BATCH_SIZE = 100`) in `voyage-embedding-provider.ts`. Sequential rather than parallel batches deliberately, to avoid bursting concurrent requests (and cost) at the provider for one large document.
+
+One issue was surfaced but deliberately left as a documented note rather than fixed: pgvector's HNSW index doesn't natively combine with a `WHERE workspace_id` filter the way a btree index would (Postgres applies the filter to the ANN candidate set, not the index scan itself) - at real scale, a workspace with few chunks could get fewer than `limit` results if other workspaces' chunks dominate the nearest-neighbor candidates. Not an issue at today's per-workspace chunk counts; noted in `knowledge-chunks.ts` for whoever revisits it once that's a real concern.
+
+All fixes re-verified end-to-end after the changes (migration applied, role guard tested against both an allowed and blocked role, batching confirmed not to break normal small-document processing) before being considered ready to commit.
