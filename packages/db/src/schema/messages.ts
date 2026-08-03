@@ -1,13 +1,13 @@
 import { sql } from "drizzle-orm";
-import { index, pgEnum, pgPolicy, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { index, jsonb, pgEnum, pgPolicy, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { conversations } from "./conversations.js";
 import { workspaces } from "./workspaces.js";
 
 // Types match 04_Domain_Model.md exactly. sender_user_id (to identify
-// which agent sent an 'agent' message) and attachments/ai_metadata
-// (06_Database_Design.md) are deliberately deferred until Phase 4 (Agent
-// Console) and Phase 3 (AI Service) actually need them - nullable columns
-// are cheap to add then, and nothing in this phase produces that data.
+// which agent sent an 'agent' message) and attachments are deliberately
+// deferred until Phase 4 (Agent Console) actually needs them - nullable
+// columns are cheap to add then, and nothing in this phase produces
+// that data.
 export const messageSenderTypeEnum = pgEnum("message_sender_type", ["customer", "agent", "system", "ai"]);
 
 export const messages = pgTable(
@@ -22,6 +22,11 @@ export const messages = pgTable(
       .references(() => conversations.id, { onDelete: "cascade" }),
     senderType: messageSenderTypeEnum("sender_type").notNull(),
     content: text("content").notNull(),
+    // Sparse by design - only 'ai' messages populate this today (provider,
+    // model, confidence, citations, token usage, finish reason). Nullable
+    // rather than a default '{}' like other tables' metadata columns,
+    // because most messages (customer/system) genuinely never have any.
+    metadata: jsonb("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

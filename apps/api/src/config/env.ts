@@ -16,6 +16,13 @@ const envSchema = z.object({
   // fail with a clear "not configured" error until it's set, rather
   // than the whole app refusing to start over a feature not yet in use.
   VOYAGE_API_KEY: z.string().optional(),
+  // Which AiProvider implementation the AI Service instantiates -
+  // see modules/ai/ai.service.ts. Defaults to Gemini (free tier) so
+  // local/dev work doesn't burn a paid Anthropic key by default;
+  // switch to "anthropic" per-environment via this one variable.
+  AI_PROVIDER: z.enum(["gemini", "anthropic"]).default("gemini"),
+  GEMINI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

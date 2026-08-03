@@ -7,7 +7,7 @@
   },
   "packageManager": "pnpm@10.33.0",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "sharp"]
+    "onlyBuiltDependencies": ["esbuild", "sharp", "@google/genai", "protobufjs"]
   },
   "scripts": {
     "dev:api": "pnpm --filter @csa/api dev",
