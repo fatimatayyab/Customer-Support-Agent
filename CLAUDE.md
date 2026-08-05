@@ -2,7 +2,7 @@
 
 **Engineering handbook for Claude Code working in this repository.** Governs *how* to work here — conventions, guardrails, process. Not product documentation.
 
-For *what* the product is and *why* it's architected this way: `docs/00`–`docs/06`. For what's actually been built, verified, and decided: `docs/07_Phase_Execution_Log.md`. Keep this file short enough to actually be read — when it starts duplicating those docs, shorten it and point instead.
+For *what* the product is and *why* it's architected this way: `docs/00`–`docs/06`. For what's actually been built, verified, and decided: `docs/07_Phase_Execution_Log.md`. For step-by-step SOPs on recurring tasks (adding an endpoint, a migration, a dashboard page, etc.): `SKILLS.md`. Keep this file short enough to actually be read — when it starts duplicating those docs, shorten it and point instead.
 
 ---
 
