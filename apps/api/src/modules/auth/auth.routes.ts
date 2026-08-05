@@ -1,8 +1,8 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { getSessionWorkspace, logIn, signUp } from "./auth.service.js";
 import { requireSession } from "./require-session.js";
-import { SESSION_COOKIE_NAME } from "./session-token.js";
+import { SESSION_COOKIE_NAME, setSessionCookie } from "./session-token.js";
 
 const signUpSchema = z.object({
   workspaceName: z.string().min(2).max(100),
@@ -16,8 +16,6 @@ const logInSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
-
-const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
 export async function authRoutes(app: FastifyInstance) {
   app.post("/auth/signup", async (request, reply) => {
@@ -42,15 +40,5 @@ export async function authRoutes(app: FastifyInstance) {
   app.get("/auth/me", { preHandler: requireSession }, async (request, reply) => {
     const workspace = await getSessionWorkspace(request.sessionUser!);
     reply.send({ user: request.sessionUser, workspace });
-  });
-}
-
-function setSessionCookie(reply: FastifyReply, token: string): void {
-  reply.setCookie(SESSION_COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
   });
 }

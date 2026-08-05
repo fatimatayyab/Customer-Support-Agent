@@ -10,6 +10,8 @@ import { integrationRoutes } from "./modules/integrations/integration.routes.js"
 import { knowledgeRoutes } from "./modules/knowledge/knowledge.routes.js";
 import { agentConsoleRealtimeRoutes } from "./modules/realtime/agent-console-ws.routes.js";
 import { widgetRealtimeRoutes } from "./modules/realtime/widget-ws.routes.js";
+import { invitationRoutes } from "./modules/users/invitation.routes.js";
+import { userRoutes } from "./modules/users/user.routes.js";
 import { identifyRoutes } from "./modules/workspace-identification/identify.routes.js";
 import { workspaceRoutes } from "./modules/workspaces/workspace.routes.js";
 
@@ -63,6 +65,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.register(conversationRoutes);
   app.register(agentConsoleRealtimeRoutes);
   app.register(integrationRoutes);
+  app.register(userRoutes);
+  app.register(invitationRoutes);
 
   app.setErrorHandler(errorHandler);
 

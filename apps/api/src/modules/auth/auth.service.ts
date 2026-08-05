@@ -15,6 +15,10 @@ export async function signUp(params: { workspaceName: string; email: string; pas
   const workspaceId = randomUUID();
   const baseSlug = slugify(params.workspaceName) || "workspace";
   const passwordHash = await hashPassword(params.password);
+  // Normalized once, here, so every email this system ever stores is
+  // canonical form going forward - the invitation flow relies on this to
+  // match against pending invites and existing accounts consistently.
+  const email = params.email.trim().toLowerCase();
 
   let attemptSlug = baseSlug;
 
@@ -28,7 +32,7 @@ export async function signUp(params: { workspaceName: string; email: string; pas
         });
         const user = await insertUser(scopedDb, {
           workspaceId,
-          email: params.email,
+          email,
           passwordHash,
           name: params.name,
           role: "owner",
@@ -56,7 +60,9 @@ export async function logIn(params: { workspaceSlug: string; email: string; pass
   }
 
   return withWorkspaceContext(workspace.id, async (scopedDb) => {
-    const user = await getUserByEmail(scopedDb, workspace.id, params.email);
+    // Case-insensitive match against normalized storage - defends
+    // against any pre-existing mixed-case rows too, not just new ones.
+    const user = await getUserByEmail(scopedDb, workspace.id, params.email.trim().toLowerCase());
     if (!user || user.status !== "active") {
       throw new AuthError("Invalid credentials.");
     }
@@ -76,11 +82,16 @@ export async function getSessionWorkspace(session: SessionUser) {
   return withWorkspaceContext(session.workspaceId, (scopedDb) => getWorkspaceById(scopedDb, session.workspaceId));
 }
 
+// Drizzle wraps the raw pg driver error in a DrizzleQueryError - the
+// real `code` lives on `.cause`, not the top-level error. Found and
+// fixed alongside the identical bug in invitation.service.ts's
+// isUniqueViolation: this check never actually matched a real slug
+// collision, so the retry-with-a-random-suffix logic above was silently
+// dead code, not a working safety net.
 function isUniqueSlugViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code: unknown }).code === UNIQUE_VIOLATION
-  );
+  return hasPgErrorCode(error, UNIQUE_VIOLATION) || hasPgErrorCode((error as { cause?: unknown })?.cause, UNIQUE_VIOLATION);
+}
+
+function hasPgErrorCode(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code: unknown }).code === code;
 }

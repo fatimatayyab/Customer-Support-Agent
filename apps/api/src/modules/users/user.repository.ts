@@ -28,3 +28,21 @@ export async function getUserById(scopedDb: ScopedDb, workspaceId: string, id: s
     .limit(1);
   return user ?? null;
 }
+
+// Never selects passwordHash - this is what the dashboard's team page
+// renders, so there's no code path where a hash could leak into a route
+// response.
+export async function listUsersForWorkspace(scopedDb: ScopedDb, workspaceId: string) {
+  return scopedDb
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      status: users.status,
+      createdAt: users.createdAt,
+    })
+    .from(users)
+    .where(eq(users.workspaceId, workspaceId))
+    .orderBy(users.createdAt);
+}

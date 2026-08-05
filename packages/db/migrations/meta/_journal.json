@@ -71,6 +71,34 @@
       "when": 1785903200365,
       "tag": "0009_shiny_leper_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785909169411,
+      "tag": "0010_curious_lyja",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785909204170,
+      "tag": "0011_grant_auth_resolver_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785910810571,
+      "tag": "0012_grant_auth_resolver_invitations_token_hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785915419545,
+      "tag": "0013_even_sister_grimm",
+      "breakpoints": true
     }
   ]
 }
