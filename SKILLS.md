@@ -2,6 +2,8 @@
 
 Step-by-step SOPs for recurring work in this repo. Pure procedure — the *why* lives in `CLAUDE.md` and `docs/00`–`06`; this file doesn't repeat it. If a step here conflicts with `CLAUDE.md`, `CLAUDE.md` wins.
 
+**Principle:** extend an existing pattern before introducing a new one. When two approaches would both work, pick the one already used elsewhere in this codebase — consistency beats cleverness.
+
 Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run typecheck` is clean, `docs/07_Phase_Execution_Log.md` has been skimmed for current status.
 
 ---
@@ -18,18 +20,17 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
 5. The call site wraps in `withWorkspaceContext(workspaceId, cb)`.
 6. Vector-search queries add an explicit `workspaceId` filter in the query itself — HNSW doesn't compose reliably with RLS alone.
 7. Don't add a new BYPASSRLS path outside `auth-resolver-client.ts`. Extending it: grant only the specific columns needed — including any used only in a `WHERE` clause, not just returned ones.
+8. A lookup by ID into another workspace's resource returns 404, not 403 — don't reveal existence. Exception: if the caller already holds a secret token for that exact resource (e.g. an invitation), a specific error is fine — there's no confidentiality benefit to vagueness there.
 
-**Verify:**
-- [ ] Two-workspace cross-check: workspace B cannot read/write workspace A's rows. ID lookups return 404, not 403 (unless the caller already holds a secret token for that resource, e.g. an invitation).
-- [ ] Exercised with a real query, not just read back from the schema.
+**Verify:** two-workspace cross-check — confirm workspace B cannot read or write workspace A's rows, and that status codes follow the 404 rule above.
 
-**Files:** `packages/db/src/tenant-context.ts`, `packages/db/src/auth-resolver-client.ts`, `packages/db/src/schema/knowledge-chunks.ts` (reference pattern)
+**Reference:** `packages/db/src/tenant-context.ts`, `packages/db/src/auth-resolver-client.ts`, `packages/db/src/schema/knowledge-chunks.ts` (pattern example)
 
 ---
 
 ## 2. API Endpoint Creation (`apps/api`)
 
-**Use when:** adding/changing a route.
+**Use when:** adding or changing a route.
 
 **Steps:**
 1. Extend an existing module (`apps/api/src/modules/<domain>/{*.routes,*.service,*.repository}.ts`) before creating a new one.
@@ -41,36 +42,28 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
 7. Any flow spanning more than one module goes through `support-orchestrator.ts` — never call two modules directly from a route.
 8. Use `request.log`, never `console.log`.
 
-**Verify:**
-- [ ] `pnpm -r run typecheck` clean.
-- [ ] Curl against a running API: allowed role, blocked role, wrong workspace.
-- [ ] Two-workspace cross-check (Skill 1) if tenant-scoped.
+**Verify:** curl the route with an allowed role, a blocked role, and a wrong workspace.
 
-**Files:** `apps/api/src/app.ts`, `apps/api/src/modules/auth/require-role.ts`, `apps/api/src/errors.ts`, `apps/api/src/error-handler.ts`, `apps/api/src/modules/knowledge/knowledge.routes.ts` (fullest reference)
+**Reference:** `apps/api/src/app.ts`, `apps/api/src/modules/auth/require-role.ts`, `apps/api/src/errors.ts`, `apps/api/src/error-handler.ts`, `apps/api/src/modules/knowledge/knowledge.routes.ts` (fullest example)
 
 ---
 
 ## 3. Database Schema & Migrations (`packages/db`)
 
-**Use when:** adding/changing a table, column, index, or RLS policy.
+**Use when:** adding or changing a table, column, index, or RLS policy.
 
 **Steps:**
 1. One entity (+ its enums) per file: `packages/db/src/schema/<entity>.ts`, exported from `index.ts`.
 2. Apply Skill 1's `workspace_id`/RLS/index pattern.
 3. A concept that doesn't fit an existing table's invariants gets its own table — not a nullable hack column.
 4. Derive insert types with `Pick<typeof table.$inferInsert, "...">`.
-5. `pnpm db:generate` → **read the generated SQL** before applying, especially RLS/index/custom-type clauses.
+5. `pnpm db:generate` → read the generated SQL before applying, especially RLS/index/custom-type clauses.
 6. `pnpm db:migrate` to apply.
 7. Assert a single-row `RETURNING` with `assertDefined()` — never a bare `!`.
 8. If two requests could genuinely race to insert the same logical row, use a partial unique index — an app-level check-then-write is not sufficient.
-9. When detecting a unique-violation, check both `error.code` and `error.cause?.code` (Drizzle wraps the driver error under `.cause`).
+9. When detecting a unique-violation, check both `error.code` and `error.cause?.code` — Drizzle wraps the raw driver error under `.cause`.
 
-**Verify:**
-- [ ] Generated SQL inspected and applied to local Docker Postgres.
-- [ ] Real insert/query exercised against the new shape.
-- [ ] RLS/index re-confirmed (Skill 1).
-
-**Files:** `packages/db/src/schema/vector-type.ts`, `packages/db/migrations/`
+**Reference:** `packages/db/src/schema/vector-type.ts`, `packages/db/migrations/`
 
 ---
 
@@ -88,12 +81,9 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
 7. Keep `embedDocuments()`/`embedQuery()` as separate `EmbeddingProvider` methods.
 8. Any endpoint accepting a URL needs the SSRF guard (reject `localhost`/`.local`/private IPs before fetching).
 
-**Verify:**
-- [ ] Real source of the new type reaches `completed`.
-- [ ] A real semantic search query retrieves it, ranked correctly.
-- [ ] Two-workspace cross-check.
+**Verify:** a real source of the new type reaches `completed`, and a real search query retrieves it, ranked correctly.
 
-**Files:** `apps/api/src/modules/knowledge/knowledge.service.ts`, `chunker.ts`, `website-extraction.ts`, `text-extraction.ts`
+**Reference:** `apps/api/src/modules/knowledge/knowledge.service.ts`, `chunker.ts`, `website-extraction.ts`, `text-extraction.ts`
 
 ---
 
@@ -111,12 +101,9 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
 7. Preserve the retrieval floor: below `MIN_RELEVANCE_SIMILARITY`, skip the provider call entirely — don't rely on prompt wording alone.
 8. Show the model's own reply even when low-confidence or self-escalating. Only zero-relevant-chunks and provider failure get a hardcoded fallback.
 
-**Verify:**
-- [ ] Real call covering: grounded question, off-topic question, induced provider failure.
-- [ ] `messages.metadata.provider`/`promptVersion` recorded correctly.
-- [ ] Cross-workspace citation check.
+**Verify:** a real call covering a grounded question, an off-topic question, and an induced provider failure — confirm `messages.metadata.provider`/`promptVersion` are recorded, and that citations only come from the calling workspace's own knowledge.
 
-**Files:** `apps/api/src/modules/ai/ai-provider.ts`, `ai.service.ts`, `ai.config.ts`, `providers/*.ts`
+**Reference:** `apps/api/src/modules/ai/ai-provider.ts`, `ai.service.ts`, `ai.config.ts`, `providers/*.ts`
 
 ---
 
@@ -135,13 +122,9 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
 8. Decide deliberately per action whether the result is customer-visible — default to agent-only (`conversation_notes`), never a broadcast message, unless there's a stated reason.
 9. Don't build a generic multi-provider connector before a second concrete provider exists.
 
-**Verify:**
-- [ ] Bad credential produces a real vendor-side error (not a mock).
-- [ ] Credential encryption round-trips correctly.
-- [ ] Two-workspace cross-check.
-- [ ] A failed action produces no `conversation_notes` entry.
+**Verify:** a bad credential produces a real vendor-side error (not a mock); credential encryption round-trips correctly; a failed action produces no `conversation_notes` entry.
 
-**Files:** `apps/api/src/modules/integrations/integration-provider.ts`, `integration.service.ts`, `credential-crypto.ts`, `providers/hubspot-integration-provider.ts`
+**Reference:** `apps/api/src/modules/integrations/integration-provider.ts`, `integration.service.ts`, `credential-crypto.ts`, `providers/hubspot-integration-provider.ts`
 
 ---
 
@@ -157,11 +140,7 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
 5. Poll for list/status views (match the cadence of the page you're extending); use `lib/agent-console-ws-client.ts` for anything needing live push.
 6. Gate role-restricted UI client-side **in addition to**, never instead of, the backend check.
 
-**Verify:**
-- [ ] Real browser click-through: happy path + one error path.
-- [ ] Zero console errors, zero failed network requests.
-
-**Files:** `apps/dashboard/lib/api.ts`, `apps/dashboard/app/conversations/[id]/page.tsx`, `apps/dashboard/lib/agent-console-ws-client.ts`
+**Reference:** `apps/dashboard/lib/api.ts`, `apps/dashboard/app/conversations/[id]/page.tsx`, `apps/dashboard/lib/agent-console-ws-client.ts`
 
 ---
 
@@ -176,14 +155,11 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
 4. Keep the ticket handshake for WS auth (`POST /widget/session` → `GET /widget/ws?ticket=...`). Never put the API key in the WS URL.
 5. Persist `customerId`/`conversationId` via `storage.ts` on the host page's own origin.
 6. Keep the build a single IIFE (`vite.config.ts`: `formats: ["iife"]`, `cssCodeSplit: false`) — one `<script>` tag, no chunking.
-7. Test against the **built** bundle via `apps/widget/example/index.html`, not just the dev server.
+7. No Playwright coverage exists for the widget yet — say so explicitly if verification was manual only.
 
-**Verify:**
-- [ ] Build, then load `example/index.html` in a real browser.
-- [ ] Bubble open/close, send/receive, typing indicator all work; zero console errors.
-- [ ] No Playwright coverage exists yet — say so explicitly if verification was manual only.
+**Verify:** build first, then verify against the **built** bundle via `example/index.html` (not the dev server) — bubble open/close, message send/receive, and the typing indicator all work.
 
-**Files:** `apps/widget/src/main.tsx`, `ws-client.ts`, `vite.config.ts`, `example/index.html`
+**Reference:** `apps/widget/src/main.tsx`, `ws-client.ts`, `vite.config.ts`, `example/index.html`
 
 ---
 
@@ -203,13 +179,13 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
 
 **Rule:** fix the root cause. Don't add a try/catch that just silences the symptom.
 
-**Files:** `apps/api/src/error-handler.ts`
+**Reference:** `apps/api/src/error-handler.ts`
 
 ---
 
 ## 10. Production Verification & Smoke Testing
 
-**Use when:** before calling any feature done — there is no automated test suite, so this is the actual bar.
+**Use when:** before calling any feature done — there is no automated test suite, so this is the actual bar. This is the default verification checklist every other skill's "Verify" step builds on.
 
 **Steps:**
 1. `pnpm -r run typecheck` clean across affected packages.
@@ -224,7 +200,7 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
 7. Remove any test data created during verification.
 8. Re-read the diff once, specifically for security/tenant-isolation/race issues, before calling it done.
 
-**Files:** `CLAUDE.md` §17, §19
+**Reference:** `CLAUDE.md` §17, §19
 
 ---
 
@@ -245,4 +221,4 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
 7. Only `git push` when explicitly asked — separately from the commit ask.
 8. Pre-commit hook fails → fix and create a **new** commit. Never `--amend` (the failed commit never happened).
 
-**Files:** `CLAUDE.md` §14, §19, §22
+**Reference:** `CLAUDE.md` §14, §19, §22
