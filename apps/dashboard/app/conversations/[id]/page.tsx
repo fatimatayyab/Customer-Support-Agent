@@ -42,6 +42,10 @@ export default function ConversationDetailPage() {
   const [noteDraft, setNoteDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hubspotConnected, setHubspotConnected] = useState(false);
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactBusy, setContactBusy] = useState(false);
+  const [contactError, setContactError] = useState<string | null>(null);
   const connectionRef = useRef<AgentConsoleConnection | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -61,6 +65,9 @@ export default function ConversationDetailPage() {
       .then((data) => setSessionUser(data?.user ?? null))
       .catch(() => router.push("/login"));
     loadDetail().catch(() => router.push("/login"));
+    apiFetch<{ integrations: { provider: string; status: string }[] }>("/integrations")
+      .then((data) => setHubspotConnected(data?.integrations.some((i) => i.provider === "hubspot" && i.status === "connected") ?? false))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
@@ -176,6 +183,28 @@ export default function ConversationDetailPage() {
     }
   }
 
+  async function handleContactLookup(event: FormEvent) {
+    event.preventDefault();
+    const email = contactEmail.trim();
+    if (!email) {
+      return;
+    }
+    setContactBusy(true);
+    setContactError(null);
+    try {
+      await apiFetch(`/conversations/${conversationId}/actions/contact-lookup`, {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      setContactEmail("");
+      await loadDetail();
+    } catch (err) {
+      setContactError(err instanceof ApiError ? err.message : "Contact lookup failed.");
+    } finally {
+      setContactBusy(false);
+    }
+  }
+
   async function handleStatusChange(status: "resolved" | "closed" | "open") {
     await apiFetch(`/conversations/${conversationId}/status`, {
       method: "PATCH",
@@ -275,6 +304,29 @@ export default function ConversationDetailPage() {
       </div>
 
       <aside className="w-64 shrink-0">
+        {hubspotConnected && (
+          <div className="mb-4">
+            <h2 className="mb-2 text-sm font-semibold tracking-wide text-slate-500 uppercase">CRM</h2>
+            <form onSubmit={handleContactLookup} className="flex flex-col gap-2">
+              <input
+                value={contactEmail}
+                onChange={(event) => setContactEmail(event.target.value)}
+                placeholder="Customer email"
+                type="email"
+                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              />
+              {contactError && <p className="text-xs text-red-600">{contactError}</p>}
+              <button
+                type="submit"
+                disabled={contactBusy || !contactEmail.trim()}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+              >
+                {contactBusy ? "Looking up..." : "Check contact"}
+              </button>
+            </form>
+          </div>
+        )}
+
         <h2 className="mb-2 text-sm font-semibold tracking-wide text-slate-500 uppercase">Internal notes</h2>
         <ul className="mb-3 space-y-2">
           {notes.length === 0 && <li className="text-sm text-slate-500">No notes yet.</li>}

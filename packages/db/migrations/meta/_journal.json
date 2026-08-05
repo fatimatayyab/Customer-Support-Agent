@@ -57,6 +57,20 @@
       "when": 1785784957565,
       "tag": "0007_lyrical_chimera",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785902224798,
+      "tag": "0008_jittery_gorilla_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785903200365,
+      "tag": "0009_shiny_leper_queen",
+      "breakpoints": true
     }
   ]
 }

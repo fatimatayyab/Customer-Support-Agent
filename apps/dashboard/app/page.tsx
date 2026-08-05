@@ -82,6 +82,9 @@ export default function DashboardHome() {
           <Link href="/knowledge" className="text-sm text-slate-500 underline">
             Knowledge
           </Link>
+          <Link href="/integrations" className="text-sm text-slate-500 underline">
+            Integrations
+          </Link>
           <button onClick={handleLogout} className="text-sm text-slate-500 underline">
             Log out
           </button>

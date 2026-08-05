@@ -1,5 +1,5 @@
 import { withWorkspaceContext } from "@csa/db";
-import { NotFoundError } from "../errors.js";
+import { AppError, NotFoundError } from "../errors.js";
 import { generateSupportReply, summarizeConversationHistory } from "../modules/ai/ai.service.js";
 import {
   CONFIDENCE_ESCALATION_THRESHOLD,
@@ -21,6 +21,9 @@ import {
 } from "../modules/conversations/conversation.repository.js";
 import { insertMessage, listMessages } from "../modules/conversations/message.repository.js";
 import { getCustomerById, insertCustomer } from "../modules/customers/customer.repository.js";
+import { insertIntegrationActionLog } from "../modules/integrations/integration-action-log.repository.js";
+import { lookupContact as lookupContactViaIntegration } from "../modules/integrations/integration.service.js";
+import type { ContactLookupResult } from "../modules/integrations/integration-provider.js";
 import { searchKnowledge } from "../modules/knowledge/knowledge.service.js";
 import { publishToConversation } from "../modules/realtime/conversation-hub.js";
 import { getUserById } from "../modules/users/user.repository.js";
@@ -410,4 +413,82 @@ export async function summarizeConversationForAgent(workspaceId: string, convers
   );
 
   return result;
+}
+
+// --- Integration Service (Phase 5) ---
+
+/**
+ * Agent-triggered only (docs/07's Phase 5 notes) - the AI never calls
+ * this itself. A successful lookup is recorded as an internal note
+ * (conversation_notes, agent-only), never a broadcast system message:
+ * unlike a claim/reassign audit message (safe, purely "who's helping
+ * you" metadata that Phase 4 deliberately does show the customer), a CRM
+ * record may contain something an agent hasn't decided is appropriate to
+ * relay yet - the same reasoning conversation_notes exists for.
+ *
+ * Every attempt is logged to integration_action_logs regardless of
+ * outcome - the audit trail 02_Product_Blueprint.md requires for the
+ * Act pillar ("every action must be secure, auditable, and
+ * permission-controlled"). "No integration connected" is a precondition,
+ * not a loggable action - it's rejected before this point, inside
+ * integration.service.ts, since there's no integration row yet to
+ * attribute a log entry to.
+ */
+export async function lookupContact(
+  workspaceId: string,
+  conversationId: string,
+  userId: string,
+  email: string,
+): Promise<ContactLookupResult> {
+  const conversation = await withWorkspaceContext(workspaceId, (scopedDb) =>
+    getConversationById(scopedDb, workspaceId, conversationId),
+  );
+  if (!conversation) {
+    throw new NotFoundError("Conversation not found.");
+  }
+
+  const outcome = await lookupContactViaIntegration(workspaceId, email);
+
+  await withWorkspaceContext(workspaceId, (scopedDb) =>
+    insertIntegrationActionLog(scopedDb, {
+      workspaceId,
+      integrationId: outcome.integrationId,
+      conversationId,
+      actionName: "contact-lookup",
+      requestParams: { email },
+      resultStatus: outcome.result ? "success" : "failure",
+      resultSummary: outcome.result
+        ? outcome.result.found
+          ? `Found contact: ${outcome.result.name ?? outcome.result.email}.`
+          : "No matching contact found."
+        : (outcome.errorMessage ?? "Unknown integration error."),
+      triggeredByUserId: userId,
+    }),
+  );
+
+  if (!outcome.result) {
+    // Specific message is safe here - this route is dashboard-only,
+    // never customer-facing, same allowance CLAUDE.md gives admin routes
+    // generally. 502: the failure is upstream (the provider), not this API.
+    throw new AppError(`Contact lookup failed: ${outcome.errorMessage ?? "unknown error"}.`, 502);
+  }
+
+  if (outcome.result.found) {
+    const { result } = outcome;
+    const summary = [
+      `Contact lookup for ${email}:`,
+      result.name ? `Name: ${result.name}` : null,
+      result.company ? `Company: ${result.company}` : null,
+      result.phone ? `Phone: ${result.phone}` : null,
+      result.lifecycleStage ? `Lifecycle stage: ${result.lifecycleStage}` : null,
+    ]
+      .filter((line): line is string => line !== null)
+      .join(" ");
+
+    await withWorkspaceContext(workspaceId, (scopedDb) =>
+      insertConversationNote(scopedDb, { workspaceId, conversationId, userId, content: summary }),
+    );
+  }
+
+  return outcome.result;
 }

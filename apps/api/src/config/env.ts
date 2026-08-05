@@ -23,6 +23,12 @@ const envSchema = z.object({
   AI_PROVIDER: z.enum(["gemini", "anthropic"]).default("gemini"),
   GEMINI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
+  // Encrypts integration credentials (e.g. a HubSpot access token) at
+  // rest - see modules/integrations/credential-crypto.ts. Unlike
+  // SESSION_JWT_SECRET, this secret has to be decryptable back to
+  // plaintext (the API calls the third-party provider with it), not just
+  // verifiable, so it's a real encryption key, not a signing secret.
+  INTEGRATION_CREDENTIALS_KEY: z.string().min(32),
 });
 
 export const env = envSchema.parse(process.env);

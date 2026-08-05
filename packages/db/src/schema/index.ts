@@ -8,3 +8,5 @@ export * from "./conversation-notes.js";
 export * from "./knowledge-sources.js";
 export * from "./knowledge-chunks.js";
 export * from "./vector-type.js";
+export * from "./integrations.js";
+export * from "./integration-action-logs.js";

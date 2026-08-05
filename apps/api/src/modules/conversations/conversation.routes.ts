@@ -6,6 +6,7 @@ import {
   addInternalNote,
   claimConversation,
   changeConversationStatus,
+  lookupContact,
   sendAgentMessage,
   suggestReplyForAgent,
   summarizeConversationForAgent,
@@ -36,6 +37,7 @@ const addNoteSchema = z.object({ content: z.string().min(1).max(4000) });
 // escalation path. This endpoint is for the explicit human actions of
 // resolving, closing, or reopening a conversation.
 const updateStatusSchema = z.object({ status: z.enum(["open", "resolved", "closed"]) });
+const contactLookupSchema = z.object({ email: z.string().email() });
 
 // Dashboard-facing: session-cookie authenticated, same as workspace.routes.ts
 // and knowledge.routes.ts. No role restriction beyond requireSession -
@@ -117,5 +119,14 @@ export async function conversationRoutes(app: FastifyInstance) {
     const body = updateStatusSchema.parse(request.body);
     await changeConversationStatus(request.workspaceId!, request.params.id, body.status);
     reply.code(204).send();
+  });
+
+  // Specific route name, not /actions/:actionName - there's exactly one
+  // action today (Phase 5). A generic dispatch shape is a decision to
+  // make once a second action exists to generalize from, not before.
+  app.post<{ Params: { id: string } }>("/conversations/:id/actions/contact-lookup", async (request, reply) => {
+    const body = contactLookupSchema.parse(request.body);
+    const result = await lookupContact(request.workspaceId!, request.params.id, request.sessionUser!.userId, body.email);
+    reply.send({ result });
   });
 }
