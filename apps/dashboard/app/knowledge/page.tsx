@@ -9,6 +9,7 @@ interface KnowledgeSource {
   id: string;
   type: string;
   title: string;
+  sourceLocation: string | null;
   status: "pending" | "processing" | "completed" | "failed";
   failureReason: string | null;
   createdAt: string;
@@ -34,6 +35,17 @@ export default function KnowledgePage() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
+
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [websiteUrls, setWebsiteUrls] = useState("");
+  const [addingWebsites, setAddingWebsites] = useState(false);
+  const [websiteError, setWebsiteError] = useState<string | null>(null);
+  const [websiteSkipped, setWebsiteSkipped] = useState<string[]>([]);
 
   async function refreshSources() {
     const data = await apiFetch<{ sources: KnowledgeSource[] }>("/knowledge/sources");
@@ -75,6 +87,58 @@ export default function KnowledgePage() {
       await refreshSources();
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleUpload(event: FormEvent) {
+    event.preventDefault();
+    if (!uploadFile) {
+      return;
+    }
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const formData = new FormData();
+      formData.append("title", uploadTitle);
+      formData.append("file", uploadFile);
+      await apiFetch("/knowledge/sources/upload", { method: "POST", body: formData });
+      setUploadTitle("");
+      setUploadFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      await refreshSources();
+    } catch (err) {
+      setUploadError(err instanceof ApiError ? err.message : "Could not upload the file.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleAddWebsites(event: FormEvent) {
+    event.preventDefault();
+    const urls = websiteUrls
+      .split("\n")
+      .map((url) => url.trim())
+      .filter(Boolean);
+    if (urls.length === 0) {
+      return;
+    }
+    setAddingWebsites(true);
+    setWebsiteError(null);
+    setWebsiteSkipped([]);
+    try {
+      const result = await apiFetch<{ skipped: string[] }>("/knowledge/sources/website", {
+        method: "POST",
+        body: JSON.stringify({ urls }),
+      });
+      setWebsiteUrls("");
+      setWebsiteSkipped(result?.skipped ?? []);
+      await refreshSources();
+    } catch (err) {
+      setWebsiteError(err instanceof ApiError ? err.message : "Could not add these URLs.");
+    } finally {
+      setAddingWebsites(false);
     }
   }
 
@@ -128,6 +192,7 @@ export default function KnowledgePage() {
                     <span className="text-red-600"> - {source.failureReason}</span>
                   )}
                 </div>
+                {source.sourceLocation && <div className="text-xs text-slate-400">{source.sourceLocation}</div>}
               </div>
               <button onClick={() => handleDelete(source.id)} className="shrink-0 text-red-600 underline">
                 Delete
@@ -158,6 +223,59 @@ export default function KnowledgePage() {
             className="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             {creating ? "Adding..." : "Add source"}
+          </button>
+        </form>
+
+        <h3 className="mt-6 mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">Upload a file</h3>
+        <form onSubmit={handleUpload} className="flex flex-col gap-2">
+          <input
+            value={uploadTitle}
+            onChange={(event) => setUploadTitle(event.target.value)}
+            placeholder="Title"
+            required
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".txt,.md,.pdf,.docx"
+            onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+            required
+            className="text-sm"
+          />
+          <p className="text-xs text-slate-400">.txt, .md, .pdf, or .docx</p>
+          {uploadError && <p className="text-sm text-red-600">{uploadError}</p>}
+          <button
+            type="submit"
+            disabled={uploading}
+            className="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {uploading ? "Uploading..." : "Upload"}
+          </button>
+        </form>
+
+        <h3 className="mt-6 mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">Add website pages</h3>
+        <form onSubmit={handleAddWebsites} className="flex flex-col gap-2">
+          <textarea
+            value={websiteUrls}
+            onChange={(event) => setWebsiteUrls(event.target.value)}
+            placeholder={"https://example.com/help/refunds\nhttps://example.com/help/shipping"}
+            rows={3}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+          />
+          <p className="text-xs text-slate-400">One URL per line. Each page is fetched and added separately.</p>
+          {websiteError && <p className="text-sm text-red-600">{websiteError}</p>}
+          {websiteSkipped.length > 0 && (
+            <p className="text-sm text-amber-700">
+              Already in your knowledge base, skipped: {websiteSkipped.join(", ")}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={addingWebsites}
+            className="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {addingWebsites ? "Adding..." : "Add pages"}
           </button>
         </form>
       </section>
