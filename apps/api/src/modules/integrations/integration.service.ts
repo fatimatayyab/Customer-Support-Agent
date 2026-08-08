@@ -2,7 +2,7 @@ import { withWorkspaceContext } from "@csa/db";
 import { AppError, NotFoundError } from "../../errors.js";
 import { decryptCredentials, encryptCredentials } from "./credential-crypto.js";
 import { deleteIntegration, getIntegrationForWorkspace, listIntegrations, upsertIntegration } from "./integration.repository.js";
-import type { ContactLookupResult } from "./integration-provider.js";
+import type { ContactLookupResult, IntegrationProvider } from "./integration-provider.js";
 import { HubSpotIntegrationProvider } from "./providers/hubspot-integration-provider.js";
 
 /**
@@ -12,9 +12,27 @@ import { HubSpotIntegrationProvider } from "./providers/hubspot-integration-prov
  * no module-level singleton here - every call looks up the workspace's
  * own row, decrypts its own credentials, and instantiates a provider
  * scoped to that one workspace's connection.
+ *
+ * The one thing that IS swappable is which class turns those credentials
+ * into a provider instance - defaulted to the real HubSpot class so
+ * production never has to think about it, but a real, explicit
+ * dependency injection seam (same reasoning as ai.service.ts's
+ * `provider` parameter) rather than a module you'd have to mock.
+ * Typed concretely as HubSpotIntegrationProvider, not the neutral
+ * IntegrationProvider interface - connectHubspot is already a
+ * HubSpot-specific flow (verifyConnection is deliberately NOT part of
+ * the neutral interface, see that method's own comment), so there's no
+ * boundary purity to preserve here the way lookupContact below has to.
  */
+type HubSpotConnectProviderFactory = (credentials: { accessToken: string }) => HubSpotIntegrationProvider;
+const defaultHubSpotConnectProviderFactory: HubSpotConnectProviderFactory = (credentials) =>
+  new HubSpotIntegrationProvider(credentials);
 
-export async function connectHubspot(workspaceId: string, accessToken: string) {
+export async function connectHubspot(
+  workspaceId: string,
+  accessToken: string,
+  createProvider: HubSpotConnectProviderFactory = defaultHubSpotConnectProviderFactory,
+) {
   // Verify before saving - a bad token (or one missing the read scope
   // this feature needs) fails loudly here instead of silently the first
   // time an agent tries to use it. Caught and rethrown as an AppError:
@@ -22,7 +40,7 @@ export async function connectHubspot(workspaceId: string, accessToken: string) {
   // just supplied, not an unexpected server failure - 400, not a generic
   // 500, and the message is safe to show (dashboard-only, admin route).
   try {
-    await new HubSpotIntegrationProvider({ accessToken }).verifyConnection();
+    await createProvider({ accessToken }).verifyConnection();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error.";
     throw new AppError(`Could not connect to HubSpot: ${message}`, 400);
@@ -59,7 +77,19 @@ export interface ContactLookupOutcome {
   errorMessage?: string;
 }
 
-export async function lookupContact(workspaceId: string, email: string): Promise<ContactLookupOutcome> {
+// Neutral IntegrationProvider factory, not the concrete-typed one
+// connectHubspot above uses - lookupContact only ever calls the
+// interface's own lookupContact() method, so it can (and should) stay
+// as vendor-agnostic as the Orchestrator that calls it.
+type IntegrationProviderFactory = (credentials: { accessToken: string }) => IntegrationProvider;
+const defaultIntegrationProviderFactory: IntegrationProviderFactory = (credentials) =>
+  new HubSpotIntegrationProvider(credentials);
+
+export async function lookupContact(
+  workspaceId: string,
+  email: string,
+  createProvider: IntegrationProviderFactory = defaultIntegrationProviderFactory,
+): Promise<ContactLookupOutcome> {
   const integration = await withWorkspaceContext(workspaceId, (scopedDb) =>
     getIntegrationForWorkspace(scopedDb, workspaceId, "hubspot"),
   );
@@ -75,7 +105,7 @@ export async function lookupContact(workspaceId: string, email: string): Promise
   // the caller can log it.
   try {
     const credentials = await decryptCredentials<{ accessToken: string }>(integration.credentials);
-    const provider = new HubSpotIntegrationProvider(credentials);
+    const provider = createProvider(credentials);
     const result = await provider.lookupContact({ email });
     return { integrationId: integration.id, result };
   } catch (error) {

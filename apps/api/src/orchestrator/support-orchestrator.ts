@@ -1,5 +1,7 @@
 import { withWorkspaceContext } from "@csa/db";
 import { AppError, NotFoundError } from "../errors.js";
+import { getDefaultJobRunner, type JobRunner } from "../job-runner.js";
+import type { AiProvider } from "../modules/ai/ai-provider.js";
 import { generateSupportReply, summarizeConversationHistory } from "../modules/ai/ai.service.js";
 import {
   CONFIDENCE_ESCALATION_THRESHOLD,
@@ -23,7 +25,8 @@ import { insertMessage, listMessages } from "../modules/conversations/message.re
 import { getCustomerById, insertCustomer } from "../modules/customers/customer.repository.js";
 import { insertIntegrationActionLog } from "../modules/integrations/integration-action-log.repository.js";
 import { lookupContact as lookupContactViaIntegration } from "../modules/integrations/integration.service.js";
-import type { ContactLookupResult } from "../modules/integrations/integration-provider.js";
+import type { ContactLookupResult, IntegrationProvider } from "../modules/integrations/integration-provider.js";
+import type { EmbeddingProvider } from "../modules/knowledge/embedding-provider.js";
 import { searchKnowledge } from "../modules/knowledge/knowledge.service.js";
 import { publishToConversation } from "../modules/realtime/conversation-hub.js";
 import { getUserById } from "../modules/users/user.repository.js";
@@ -45,6 +48,29 @@ import { getWorkspaceById } from "../modules/workspaces/workspace.repository.js"
  * side effect, or crosses module boundaries (knowledge + AI), which is
  * exactly what belongs in the Orchestrator.
  */
+
+/**
+ * Optional, all-defaulted overrides for the handful of functions below
+ * that reach a provider or run detached background work. Real
+ * dependency injection: `deps` is a second, separate parameter from
+ * each function's plain business-data params (never merged into them),
+ * so production call sites never pass it and behavior is unchanged -
+ * only a caller that wants to override something (today, only tests)
+ * ever supplies it. This is what makes generateAiReply's fire-and-forget
+ * AI-reply path deterministically testable without exporting any
+ * `__set...ForTesting` function: swap in a SynchronousJobRunner and a
+ * fake AiProvider/EmbeddingProvider here, and handleCustomerMessage's
+ * returned promise doesn't resolve until that path has genuinely
+ * finished. See job-runner.ts and ai.service.ts/knowledge.service.ts's
+ * own default-parameter treatment of AiProvider/EmbeddingProvider for
+ * the full reasoning.
+ */
+export interface OrchestratorDeps {
+  jobRunner?: JobRunner;
+  aiProvider?: AiProvider;
+  embeddingProvider?: EmbeddingProvider;
+  integrationProviderFactory?: (credentials: { accessToken: string }) => IntegrationProvider;
+}
 
 interface InitiateConversationParams {
   workspaceId: string;
@@ -91,7 +117,7 @@ interface HandleCustomerMessageParams {
   content: string;
 }
 
-export async function handleCustomerMessage(params: HandleCustomerMessageParams) {
+export async function handleCustomerMessage(params: HandleCustomerMessageParams, deps: OrchestratorDeps = {}) {
   const { message, assignedUserId } = await withWorkspaceContext(params.workspaceId, async (scopedDb) => {
     const conversation = await getConversationById(scopedDb, params.workspaceId, params.conversationId);
     if (!conversation) {
@@ -119,8 +145,16 @@ export async function handleCustomerMessage(params: HandleCustomerMessageParams)
   // to the customer. It keeps helping right up until that point,
   // including while merely 'escalated' but still unclaimed - a human
   // being unavailable shouldn't mean the customer gets silence.
+  //
+  // Routed through JobRunner, not a bare `void ...`: in production
+  // (InProcessJobRunner) this is exactly the same detached background
+  // call as before - the HTTP/WS response doesn't wait on an AI call.
+  // See job-runner.ts and this file's OrchestratorDeps comment for why.
   if (!assignedUserId) {
-    void generateAiReply(params.workspaceId, params.conversationId, params.content).catch(() => {});
+    const jobRunner = deps.jobRunner ?? getDefaultJobRunner();
+    await jobRunner.run(() =>
+      generateAiReply(params.workspaceId, params.conversationId, params.content, deps).catch(() => {}),
+    );
   }
 
   return message;
@@ -136,7 +170,12 @@ export async function handleCustomerMessage(params: HandleCustomerMessageParams)
  * guess even when it is called. Confidence/escalation is a second,
  * independent layer on top of both.
  */
-async function generateAiReply(workspaceId: string, conversationId: string, customerMessage: string): Promise<void> {
+async function generateAiReply(
+  workspaceId: string,
+  conversationId: string,
+  customerMessage: string,
+  deps: OrchestratorDeps = {},
+): Promise<void> {
   publishToConversation(conversationId, { type: "typing:start", payload: {} });
 
   try {
@@ -153,9 +192,9 @@ async function generateAiReply(workspaceId: string, conversationId: string, cust
       .slice(-MAX_HISTORY_MESSAGES)
       .map((entry) => ({ senderType: entry.senderType, content: entry.content }));
 
-    const relevantChunks = (await searchKnowledge(workspaceId, customerMessage, RETRIEVAL_LIMIT)).filter(
-      (chunk) => chunk.similarity >= MIN_RELEVANCE_SIMILARITY,
-    );
+    const relevantChunks = (
+      await searchKnowledge(workspaceId, customerMessage, RETRIEVAL_LIMIT, deps.embeddingProvider)
+    ).filter((chunk) => chunk.similarity >= MIN_RELEVANCE_SIMILARITY);
 
     if (relevantChunks.length === 0) {
       await withWorkspaceContext(workspaceId, (scopedDb) =>
@@ -168,17 +207,20 @@ async function generateAiReply(workspaceId: string, conversationId: string, cust
       return;
     }
 
-    const result = await generateSupportReply({
-      workspaceName,
-      history: recentHistory,
-      retrievedContext: relevantChunks.map((chunk) => ({
-        knowledgeChunkId: chunk.id,
-        knowledgeSourceId: chunk.knowledgeSourceId,
-        content: chunk.content,
-        similarity: chunk.similarity,
-      })),
-      customerMessage,
-    });
+    const result = await generateSupportReply(
+      {
+        workspaceName,
+        history: recentHistory,
+        retrievedContext: relevantChunks.map((chunk) => ({
+          knowledgeChunkId: chunk.id,
+          knowledgeSourceId: chunk.knowledgeSourceId,
+          content: chunk.content,
+          similarity: chunk.similarity,
+        })),
+        customerMessage,
+      },
+      deps.aiProvider,
+    );
 
     const aiMessage = await withWorkspaceContext(workspaceId, (scopedDb) =>
       insertMessage(scopedDb, {
@@ -338,7 +380,7 @@ export async function addInternalNote(workspaceId: string, conversationId: strin
  * is still a bad suggestion, even if a human reviews it before it goes
  * anywhere.
  */
-export async function suggestReplyForAgent(workspaceId: string, conversationId: string) {
+export async function suggestReplyForAgent(workspaceId: string, conversationId: string, deps: OrchestratorDeps = {}) {
   const { workspaceName, history } = await withWorkspaceContext(workspaceId, async (scopedDb) => {
     const conversation = await getConversationById(scopedDb, workspaceId, conversationId);
     if (!conversation) {
@@ -361,29 +403,36 @@ export async function suggestReplyForAgent(workspaceId: string, conversationId: 
     .slice(-MAX_HISTORY_MESSAGES)
     .map((entry) => ({ senderType: entry.senderType, content: entry.content }));
 
-  const relevantChunks = (await searchKnowledge(workspaceId, lastCustomerMessage.content, RETRIEVAL_LIMIT)).filter(
-    (chunk) => chunk.similarity >= MIN_RELEVANCE_SIMILARITY,
-  );
+  const relevantChunks = (
+    await searchKnowledge(workspaceId, lastCustomerMessage.content, RETRIEVAL_LIMIT, deps.embeddingProvider)
+  ).filter((chunk) => chunk.similarity >= MIN_RELEVANCE_SIMILARITY);
 
   if (relevantChunks.length === 0) {
     return null;
   }
 
-  return generateSupportReply({
-    workspaceName,
-    history: recentHistory,
-    retrievedContext: relevantChunks.map((chunk) => ({
-      knowledgeChunkId: chunk.id,
-      knowledgeSourceId: chunk.knowledgeSourceId,
-      content: chunk.content,
-      similarity: chunk.similarity,
-    })),
-    customerMessage: lastCustomerMessage.content,
-  });
+  return generateSupportReply(
+    {
+      workspaceName,
+      history: recentHistory,
+      retrievedContext: relevantChunks.map((chunk) => ({
+        knowledgeChunkId: chunk.id,
+        knowledgeSourceId: chunk.knowledgeSourceId,
+        content: chunk.content,
+        similarity: chunk.similarity,
+      })),
+      customerMessage: lastCustomerMessage.content,
+    },
+    deps.aiProvider,
+  );
 }
 
 /** On-demand only, not auto-triggered on escalation - see docs/07's Phase 4 notes for why. */
-export async function summarizeConversationForAgent(workspaceId: string, conversationId: string) {
+export async function summarizeConversationForAgent(
+  workspaceId: string,
+  conversationId: string,
+  deps: OrchestratorDeps = {},
+) {
   const { workspaceName, history } = await withWorkspaceContext(workspaceId, async (scopedDb) => {
     const conversation = await getConversationById(scopedDb, workspaceId, conversationId);
     if (!conversation) {
@@ -397,10 +446,15 @@ export async function summarizeConversationForAgent(workspaceId: string, convers
     return { workspaceName: workspace.name, history: allMessages };
   });
 
-  const result = await summarizeConversationHistory({
-    workspaceName,
-    history: history.slice(-MAX_HISTORY_MESSAGES).map((entry) => ({ senderType: entry.senderType, content: entry.content })),
-  });
+  const result = await summarizeConversationHistory(
+    {
+      workspaceName,
+      history: history
+        .slice(-MAX_HISTORY_MESSAGES)
+        .map((entry) => ({ senderType: entry.senderType, content: entry.content })),
+    },
+    deps.aiProvider,
+  );
 
   await withWorkspaceContext(workspaceId, (scopedDb) =>
     saveConversationSummary(scopedDb, workspaceId, conversationId, {
@@ -439,6 +493,7 @@ export async function lookupContact(
   conversationId: string,
   userId: string,
   email: string,
+  deps: OrchestratorDeps = {},
 ): Promise<ContactLookupResult> {
   const conversation = await withWorkspaceContext(workspaceId, (scopedDb) =>
     getConversationById(scopedDb, workspaceId, conversationId),
@@ -447,7 +502,7 @@ export async function lookupContact(
     throw new NotFoundError("Conversation not found.");
   }
 
-  const outcome = await lookupContactViaIntegration(workspaceId, email);
+  const outcome = await lookupContactViaIntegration(workspaceId, email, deps.integrationProviderFactory);
 
   await withWorkspaceContext(workspaceId, (scopedDb) =>
     insertIntegrationActionLog(scopedDb, {

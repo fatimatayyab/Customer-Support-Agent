@@ -18,14 +18,34 @@ function createAiProvider(): AiProvider {
   }
 }
 
-const aiProvider: AiProvider = createAiProvider();
-
-export function generateSupportReply(input: GenerateReplyInput): Promise<AiReplyResult> {
-  return aiProvider.generateReply(input);
+// Lazily constructed, not built at import time: constructing a provider
+// touches its SDK client (and, for some providers, its API key) as a
+// side effect, which previously ran the moment this module was
+// imported for any reason, including importing it just for its types.
+// Cached after first use so a caller that doesn't pass its own
+// provider doesn't pay construction cost more than once.
+let defaultAiProvider: AiProvider | undefined;
+function getDefaultAiProvider(): AiProvider {
+  return (defaultAiProvider ??= createAiProvider());
 }
 
-export function summarizeConversationHistory(input: SummarizeInput): Promise<SummarizeResult> {
-  return aiProvider.summarize(input);
+// The `provider` parameter is real dependency injection, not a testing
+// convenience bolted on: it's also the exact shape a future per-workspace
+// AI Configuration entity needs (docs/07's tech-debt note) - whatever
+// resolves "which provider for this workspace" will call this with an
+// explicit provider instead of relying on the env-var-selected default.
+export function generateSupportReply(
+  input: GenerateReplyInput,
+  provider: AiProvider = getDefaultAiProvider(),
+): Promise<AiReplyResult> {
+  return provider.generateReply(input);
+}
+
+export function summarizeConversationHistory(
+  input: SummarizeInput,
+  provider: AiProvider = getDefaultAiProvider(),
+): Promise<SummarizeResult> {
+  return provider.summarize(input);
 }
 
 export type { AiReplyResult, ConversationTurn, Citation, RetrievedContext, SummarizeResult } from "./ai-provider.js";

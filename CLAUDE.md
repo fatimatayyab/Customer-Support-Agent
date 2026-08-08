@@ -60,7 +60,7 @@ AI-powered customer support SaaS (multi-tenant: "Workspace" = tenant). A busines
 | API | Fastify 5 (`apps/api`) | Plugins: `@fastify/cookie`, `@fastify/cors`, `@fastify/websocket`. |
 | DB access | Drizzle ORM + drizzle-kit (`packages/db`) | Schema-as-code, including RLS policies (`pgPolicy`). No native pgvector column type — see `vector-type.ts`'s `customType`. |
 | Database | PostgreSQL 16 + pgvector (Docker, host port **5433** — 5432 is occupied by a native install) | Roles: `postgres` (superuser, migrations), `app_user` (NOSUPERUSER/NOBYPASSRLS, normal queries), `auth_resolver` (BYPASSRLS, narrow column grants, pre-tenant-context lookups only — §8). |
-| Cache/pub-sub | Redis (Docker, port 6379) | Provisioned, not yet used — reserved for the real-time hub once it runs across more than one API instance. |
+| Cache/pub-sub | Redis (Docker, port 6379), via `ioredis` (`redis-client.ts`) | First real consumer: rate limiting (§14). The real-time hub itself is still in-process, not Redis-backed — that swap remains reserved for once it runs across more than one API instance. |
 | Auth | `jose` (JWT), `@node-rs/argon2` (passwords), SHA-256 (API keys) | Session cookies for dashboard (7-day, httpOnly, can't be force-revoked before expiry — accepted tradeoff). Short-lived (60s) single-purpose tickets for the widget's WebSocket handshake. |
 | Validation | Zod, everywhere input enters the system | Env vars, route bodies, WebSocket message shapes. Route-level parsing throws `ZodError`, caught centrally (§13). |
 | Embeddings | Voyage AI (`voyage-3-lite`, 512 dims) behind an `EmbeddingProvider` interface | Anthropic's recommended RAG pairing (Claude has no embeddings API). Swap the implementation, not the interface, if that changes. |
@@ -108,9 +108,9 @@ A new domain gets a new folder under `apps/api/src/modules/`. Don't add a top-le
 | Component | Owns | Never does |
 |---|---|---|
 | **Support Orchestrator** | Business logic, workflow, application state, conversation lifecycle | Contain AI logic; call third-party APIs directly |
-| **AI Service** (not yet built) | Intent understanding, response generation, tool selection, confidence scoring | Business rules, auth decisions, own state, touch the DB, call third parties directly |
+| **AI Service** (`modules/ai`, built — Phase 3) | Intent understanding, response generation, tool selection, confidence scoring | Business rules, auth decisions, own state, touch the DB, call third parties directly |
 | **Knowledge Service** (`modules/knowledge`) | Ingestion, chunking, embedding, semantic search | Decide *when* to retrieve for a conversation — that's the Orchestrator's call |
-| **Integration Service** (not yet built) | The only thing that talks to external business systems (Shopify, Stripe, etc.), normalizes responses | Being called by anything other than the Orchestrator |
+| **Integration Service** (`modules/integrations`, built — Phase 5, HubSpot contact lookup only) | The only thing that talks to external business systems, normalizes responses | Being called by anything other than the Orchestrator |
 | **Realtime hub** (`modules/realtime`) | Connection tracking, message/typing fan-out | Persistence — it's a transport layer, not a data store |
 
 The Orchestrator is the only thing that talks to more than one of these in a single flow.
@@ -143,9 +143,9 @@ Any new tenant table or endpoint gets a two-workspace cross-check before it's ca
 
 ---
 
-## 10. AI Service Responsibilities (not yet built)
+## 10. AI Service Responsibilities
 
-What this module must and must never do is already covered by §2's Core Architecture Rules and §7's Service Boundaries table — don't re-list it here once it's built. Two things worth deciding ahead of time: it will live at `apps/api/src/modules/ai/`, built behind a provider interface (mirroring `EmbeddingProvider`) even though Claude is the only planned implementation. Confidence-scoring methodology is an open question — decide it deliberately when the module is built, and note the choice in `docs/07`.
+Built (Phase 3), at `apps/api/src/modules/ai/`. What it must and must never do is covered by §2's Core Architecture Rules and §7's Service Boundaries table. Behind a provider interface (`AiProvider`, mirroring `EmbeddingProvider`) with two real implementations (Gemini default, Anthropic), selected via `AI_PROVIDER`. Confidence-scoring and grounding methodology (relevance floor + confidence threshold, both structural not just prompted) is decided and recorded in `docs/07`'s Phase 3 entry.
 
 ---
 
@@ -188,7 +188,7 @@ What this module must and must never do is already covered by §2's Core Archite
 - Every request identifies its workspace before any business logic runs (§8).
 - Match hash cost to secret entropy: slow/memory-hard (Argon2) for human-chosen passwords, fast (SHA-256) for already-high-entropy API keys — don't swap these.
 - Secrets are hashed at rest; the raw value is shown once, at creation, never again.
-- **No rate limiting exists anywhere yet** (login, signup, WebSocket messages, ingestion) — known, accepted gap. Note whether a new public-facing or cost-incurring endpoint needs it before shipping.
+- **Rate limiting** covers login/signup (`@fastify/rate-limit`, IP-keyed, per-route config in `auth.routes.ts`), knowledge ingestion and invitation creation (workspace-keyed via `rateLimitByWorkspace`, `apps/api/src/rate-limit.ts`), and the WS `message:send` path (conversation-keyed, checked inline — `@fastify/rate-limit` can't reach a WebSocket message). Backed by the shared Redis client (`redis-client.ts`) — its first real consumer. A new public-facing or cost-incurring endpoint (anything calling a paid external API) should get one of these two patterns, not ship unprotected by default now that the precedent exists.
 - Any new BYPASSRLS access path must be as narrow as `auth_resolver`'s — specific columns, specific tables, documented inline.
 - Never commit a real secret. Check `git status`/`git diff` for `.env`-shaped content before every commit, even when the filename looks safe.
 
@@ -217,13 +217,15 @@ What this module must and must never do is already covered by §2's Core Archite
 
 ## 17. Testing Expectations
 
-**No automated test suite exists yet** — a known, prioritized gap. Priority order when one is introduced: the Orchestrator and the tenant-isolation boundary first, since a regression there is a cross-tenant data leak — the worst bug class this system can have.
+An automated suite exists, scoped deliberately to the highest-risk surface first: `packages/db/src/tenant-isolation.test.ts` (a generic, schema-driven RLS check — iterates every tenant table automatically, so a new table without a registered fixture fails loudly instead of shipping untested) and `apps/api/src/orchestrator/support-orchestrator.test.ts` (all nine Orchestrator functions, plus two-workspace cross-tenant checks). Vitest, run against a real, separate `csa_test` Postgres database (not mocks — the whole point is proving RLS actually holds) via `pnpm --filter @csa/db test` / `pnpm --filter @csa/api test`. One-time local setup: `pnpm --filter @csa/db test:db:setup` (idempotent — safe to re-run after a new migration).
 
-Until then, the interim bar for "verified" is real execution, not just `tsc`:
+Extending it: reuse `apps/api/src/test-support/` (`resetDatabase`, `fixtures.ts`, `FakeAiProvider`/`FakeEmbeddingProvider`/`FakeIntegrationProvider`) rather than hand-rolling new ones. Fake at the provider-interface boundary (`AiProvider`/`EmbeddingProvider`/`IntegrationProvider`), never at the service-function layer — a fake provider still exercises the real grounding/escalation logic around it; a faked service function would silently stop testing whatever that layer grows over time. Never add a `__set...ForTesting` export — if a code path is unreachable by an ordinary defaulted parameter (see `OrchestratorDeps` in `support-orchestrator.ts`), that's what `JobRunner`'s `SynchronousJobRunner` is for (see `job-runner.ts`), not a new escape hatch.
+
+Coverage is not yet exhaustive — module-level routes, the widget/dashboard, and most non-Orchestrator services still rely on the interim bar below. Apply both:
 
 - `pnpm -r run typecheck` (or targeted `--filter`) clean across every affected package — necessary, not sufficient.
 - An actual API call (curl) or browser check (Playwright) exercising the real path — don't declare a feature done off types alone.
-- Any change touching a tenant table or a new endpoint: a two-workspace cross-check (workspace B genuinely cannot see workspace A's data).
+- Any change touching a tenant table or a new endpoint: a two-workspace cross-check (workspace B genuinely cannot see workspace A's data) — and if the table is in `tenant-isolation.test.ts`'s generic loop, add its `fixtures` entry rather than relying on manual verification alone.
 - Any UI change: drive it in a real browser, screenshot it, check the console for errors.
 
 ---
@@ -299,11 +301,12 @@ Reversing one of these is fine — but it should be a deliberate call with a sta
 
 ## 23. Session Bootstrap Checklist
 
-1. Read `docs/07_Phase_Execution_Log.md` for current phase status — more current than §4.
+1. Read `docs/07_Phase_Execution_Log.md` for current phase status — more current than §4. Read the last 1-2 entries in full; earlier ones can be skimmed.
 2. `git log --oneline -5` and `git status` — confirm what's committed vs. pending; don't assume prior conversation state still matches disk.
 3. `pnpm docker:up`, confirm Postgres (port **5433**) and Redis are healthy before assuming DB-dependent work will run.
 4. `pnpm -r run typecheck` as a baseline sanity check before making changes.
-5. If continuing knowledge/RAG work, confirm `VOYAGE_API_KEY` is set locally — ingestion/search fail gracefully but visibly without it.
+5. `pnpm --filter @csa/db test` and `pnpm --filter @csa/api test` as a baseline — both should be green before you start (see §17). First time only: `pnpm --filter @csa/db test:db:setup` creates/migrates the separate `csa_test` database.
+6. If continuing knowledge/RAG work, confirm `VOYAGE_API_KEY` is set locally — ingestion/search fail gracefully but visibly without it.
 
 ## 24. Project Context Loading
 

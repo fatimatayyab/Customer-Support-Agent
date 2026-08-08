@@ -1,6 +1,7 @@
 import { withWorkspaceContext } from "@csa/db";
 import { assertDefined } from "../../assert.js";
 import { AppError, NotFoundError } from "../../errors.js";
+import { getDefaultJobRunner, type JobRunner } from "../../job-runner.js";
 import { chunkFaqContent, chunkText } from "./chunker.js";
 import type { EmbeddingProvider } from "./embedding-provider.js";
 import { insertKnowledgeChunks, searchSimilarChunks, type SimilarChunk } from "./knowledge-chunk.repository.js";
@@ -37,9 +38,25 @@ const UPLOAD_EXTENSION_HANDLERS: Record<string, { type: SupportedUploadType; ext
 
 const DEFAULT_SEARCH_LIMIT = 5;
 
-// Swappable per the EmbeddingProvider abstraction - Voyage is the only
-// implementation today, but nothing below this line depends on that.
-const embeddingProvider: EmbeddingProvider = new VoyageEmbeddingProvider();
+// Lazily constructed, not built at import time - see ai.service.ts's
+// identical getDefaultAiProvider() for the full reasoning (avoids an
+// import-time side effect, and doubles as the seam a future
+// per-workspace embedding choice would use). Swappable per the
+// EmbeddingProvider abstraction - Voyage is the only implementation
+// today, but nothing below this line depends on that.
+let defaultEmbeddingProvider: EmbeddingProvider | undefined;
+function getDefaultEmbeddingProvider(): EmbeddingProvider {
+  return (defaultEmbeddingProvider ??= new VoyageEmbeddingProvider());
+}
+
+// Optional, defaulted overrides for the two things this module would
+// otherwise reach for as module-level singletons. Real dependency
+// injection, not a testing-only hook: any caller can supply its own
+// jobRunner/embeddingProvider, production just never needs to.
+export interface KnowledgeServiceDeps {
+  jobRunner?: JobRunner;
+  embeddingProvider?: EmbeddingProvider;
+}
 
 export class UnsupportedSourceTypeError extends AppError {
   constructor(type: string) {
@@ -70,7 +87,7 @@ interface CreateKnowledgeSourceParams {
   content: string;
 }
 
-export async function createKnowledgeSource(params: CreateKnowledgeSourceParams) {
+export async function createKnowledgeSource(params: CreateKnowledgeSourceParams, deps: KnowledgeServiceDeps = {}) {
   if (!isSupportedIngestionType(params.type)) {
     throw new UnsupportedSourceTypeError(params.type);
   }
@@ -87,17 +104,22 @@ export async function createKnowledgeSource(params: CreateKnowledgeSourceParams)
     }),
   );
 
-  // Not awaited: chunking + embedding a document can take a few seconds
-  // and there's no reason to hold the HTTP response open for it. This is
-  // in-process background work, not a real job queue - if the API
-  // restarts mid-processing, that source is stuck in 'processing' until
-  // manually retried. Acceptable for Phase 2's text-only sources; a real
-  // queue (with retries) becomes worth the complexity once pdf/website
-  // ingestion makes this take much longer or run at real volume.
-  void processKnowledgeSource(params.workspaceId, source.id).catch(() => {
-    // Failure is already recorded on the source row itself, inside
-    // processKnowledgeSource's catch block.
-  });
+  // Routed through JobRunner rather than a bare `void ...` call: in
+  // production (InProcessJobRunner) this is exactly today's
+  // fire-and-forget behavior - chunking + embedding can take a few
+  // seconds and there's no reason to hold the HTTP response open for
+  // it. This is in-process background work, not a real job queue - if
+  // the API restarts mid-processing, that source is stuck in
+  // 'processing' until manually retried (see job-runner.ts for the
+  // scoped-swap story). In a test using SynchronousJobRunner, this
+  // await genuinely waits for processing to finish - see job-runner.ts.
+  const jobRunner = deps.jobRunner ?? getDefaultJobRunner();
+  await jobRunner.run(() =>
+    processKnowledgeSource(params.workspaceId, source.id, deps).catch(() => {
+      // Failure is already recorded on the source row itself, inside
+      // processKnowledgeSource's catch block.
+    }),
+  );
 
   return source;
 }
@@ -113,7 +135,10 @@ interface CreateKnowledgeSourceFromUploadParams {
 // embed step below - it's fast and CPU-only (no external API call), so
 // a corrupt/unreadable file fails immediately with a clear error
 // instead of silently landing in status: 'failed' a few seconds later.
-export async function createKnowledgeSourceFromUpload(params: CreateKnowledgeSourceFromUploadParams) {
+export async function createKnowledgeSourceFromUpload(
+  params: CreateKnowledgeSourceFromUploadParams,
+  deps: KnowledgeServiceDeps = {},
+) {
   const extension = params.filename.split(".").pop()?.toLowerCase() ?? "";
   const handler = UPLOAD_EXTENSION_HANDLERS[extension];
   if (!handler) {
@@ -130,7 +155,8 @@ export async function createKnowledgeSourceFromUpload(params: CreateKnowledgeSou
     }),
   );
 
-  void processKnowledgeSource(params.workspaceId, source.id).catch(() => {});
+  const jobRunner = deps.jobRunner ?? getDefaultJobRunner();
+  await jobRunner.run(() => processKnowledgeSource(params.workspaceId, source.id, deps).catch(() => {}));
 
   return source;
 }
@@ -149,7 +175,10 @@ interface CreateKnowledgeSourcesFromUrlsParams {
   urls: string[];
 }
 
-export async function createKnowledgeSourcesFromUrls(params: CreateKnowledgeSourcesFromUrlsParams) {
+export async function createKnowledgeSourcesFromUrls(
+  params: CreateKnowledgeSourcesFromUrlsParams,
+  deps: KnowledgeServiceDeps = {},
+) {
   const urls = params.urls.slice(0, MAX_URLS_PER_SUBMISSION);
 
   // Title is the URL itself until the background fetch (see
@@ -192,17 +221,25 @@ export async function createKnowledgeSourcesFromUrls(params: CreateKnowledgeSour
   // submission - the same "batch sequentially, not in parallel"
   // principle already applied to per-source chunk embedding in Phase 2,
   // just also applied across sources here.
-  void processSourcesSequentially(
-    params.workspaceId,
-    sources.map((source) => source.id),
+  const jobRunner = deps.jobRunner ?? getDefaultJobRunner();
+  await jobRunner.run(() =>
+    processSourcesSequentially(
+      params.workspaceId,
+      sources.map((source) => source.id),
+      deps,
+    ),
   );
 
   return { sources, skipped };
 }
 
-async function processSourcesSequentially(workspaceId: string, sourceIds: string[]): Promise<void> {
+async function processSourcesSequentially(
+  workspaceId: string,
+  sourceIds: string[],
+  deps: KnowledgeServiceDeps,
+): Promise<void> {
   for (const sourceId of sourceIds) {
-    await processKnowledgeSource(workspaceId, sourceId).catch(() => {});
+    await processKnowledgeSource(workspaceId, sourceId, deps).catch(() => {});
   }
 }
 
@@ -223,6 +260,7 @@ export async function searchKnowledge(
   workspaceId: string,
   query: string,
   limit: number = DEFAULT_SEARCH_LIMIT,
+  embeddingProvider: EmbeddingProvider = getDefaultEmbeddingProvider(),
 ): Promise<SimilarChunk[]> {
   const queryEmbedding = await embeddingProvider.embedQuery(query);
   return withWorkspaceContext(workspaceId, (scopedDb) =>
@@ -230,7 +268,12 @@ export async function searchKnowledge(
   );
 }
 
-async function processKnowledgeSource(workspaceId: string, sourceId: string): Promise<void> {
+async function processKnowledgeSource(
+  workspaceId: string,
+  sourceId: string,
+  deps: KnowledgeServiceDeps = {},
+): Promise<void> {
+  const embeddingProvider = deps.embeddingProvider ?? getDefaultEmbeddingProvider();
   try {
     await withWorkspaceContext(workspaceId, (scopedDb) =>
       updateKnowledgeSourceStatus(scopedDb, workspaceId, sourceId, { status: "processing" }),
