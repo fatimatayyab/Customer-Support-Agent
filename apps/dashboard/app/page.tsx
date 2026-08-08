@@ -82,6 +82,9 @@ export default function DashboardHome() {
           <Link href="/knowledge" className="text-sm text-slate-500 underline">
             Knowledge
           </Link>
+          <Link href="/analytics" className="text-sm text-slate-500 underline">
+            Analytics
+          </Link>
           <Link href="/integrations" className="text-sm text-slate-500 underline">
             Integrations
           </Link>

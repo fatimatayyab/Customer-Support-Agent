@@ -7,6 +7,7 @@ import { env } from "./config/env.js";
 import { errorHandler } from "./error-handler.js";
 import { redisClient } from "./redis-client.js";
 import { RateLimitExceededError } from "./rate-limit.js";
+import { analyticsRoutes } from "./modules/analytics/analytics.routes.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { conversationRoutes } from "./modules/conversations/conversation.routes.js";
 import { integrationRoutes } from "./modules/integrations/integration.routes.js";
@@ -94,6 +95,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.register(integrationRoutes);
   app.register(userRoutes);
   app.register(invitationRoutes);
+  app.register(analyticsRoutes);
 
   app.setErrorHandler(errorHandler);
 
