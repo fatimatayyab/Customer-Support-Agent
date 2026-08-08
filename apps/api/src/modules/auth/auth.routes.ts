@@ -17,15 +17,22 @@ const logInSchema = z.object({
   password: z.string().min(1),
 });
 
+// IP-keyed (the plugin's default) - there's no workspace context yet at
+// signup, and login identifies a workspace by slug in the body, not
+// something available to key on before the handler runs. Tight enough
+// to blunt credential-stuffing/signup-spam without punishing a genuine
+// user who mistypes a password a few times.
+const AUTH_RATE_LIMIT = { max: 10, timeWindow: "10 minutes" };
+
 export async function authRoutes(app: FastifyInstance) {
-  app.post("/auth/signup", async (request, reply) => {
+  app.post("/auth/signup", { config: { rateLimit: AUTH_RATE_LIMIT } }, async (request, reply) => {
     const body = signUpSchema.parse(request.body);
     const { token, session, workspace } = await signUp(body);
     setSessionCookie(reply, token);
     reply.code(201).send({ user: session, workspace });
   });
 
-  app.post("/auth/login", async (request, reply) => {
+  app.post("/auth/login", { config: { rateLimit: AUTH_RATE_LIMIT } }, async (request, reply) => {
     const body = logInSchema.parse(request.body);
     const { token, session } = await logIn(body);
     setSessionCookie(reply, token);

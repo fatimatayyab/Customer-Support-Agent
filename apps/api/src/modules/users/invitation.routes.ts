@@ -4,6 +4,8 @@ import { WORKSPACE_ROLES, type WorkspaceRole } from "@csa/shared";
 import { requireRole } from "../auth/require-role.js";
 import { requireSession } from "../auth/require-session.js";
 import { setSessionCookie } from "../auth/session-token.js";
+import { rateLimitByWorkspace } from "../../rate-limit.js";
+import { redisClient } from "../../redis-client.js";
 import {
   acceptInvitation,
   createOrResendInvitation,
@@ -28,23 +30,32 @@ const MANAGE_INVITATIONS_ROLES: WorkspaceRole[] = ["owner", "administrator"];
 // in one plugin, same shape as auth.routes.ts (signup/login are public,
 // /auth/me is gated) - per-route preHandler, not a blanket addHook,
 // since a hook here would incorrectly gate the public routes too.
+// Keyed by workspace, not IP - the risk here is invite-spam against one
+// workspace's team (and, once a real EmailSender lands, real email
+// deliverability/cost), not a single client's request volume.
+const INVITE_RATE_LIMIT = rateLimitByWorkspace(redisClient, "invite-create", 20, 60 * 60);
+
 export async function invitationRoutes(app: FastifyInstance) {
-  app.post("/workspaces/invitations", { preHandler: requireSession }, async (request, reply) => {
-    requireRole(
-      request.sessionUser!.role,
-      MANAGE_INVITATIONS_ROLES,
-      "Only Owners and Administrators can invite team members.",
-    );
-    const body = createInvitationSchema.parse(request.body);
-    const inviter = { id: request.sessionUser!.userId, role: request.sessionUser!.role };
-    const { inviteUrl, expiresAt } = await createOrResendInvitation(
-      request.workspaceId!,
-      inviter,
-      body.email,
-      body.role,
-    );
-    reply.code(201).send({ inviteUrl, expiresAt });
-  });
+  app.post(
+    "/workspaces/invitations",
+    { preHandler: [requireSession, INVITE_RATE_LIMIT] },
+    async (request, reply) => {
+      requireRole(
+        request.sessionUser!.role,
+        MANAGE_INVITATIONS_ROLES,
+        "Only Owners and Administrators can invite team members.",
+      );
+      const body = createInvitationSchema.parse(request.body);
+      const inviter = { id: request.sessionUser!.userId, role: request.sessionUser!.role };
+      const { inviteUrl, expiresAt } = await createOrResendInvitation(
+        request.workspaceId!,
+        inviter,
+        body.email,
+        body.role,
+      );
+      reply.code(201).send({ inviteUrl, expiresAt });
+    },
+  );
 
   app.get("/workspaces/invitations", { preHandler: requireSession }, async (request, reply) => {
     const invitations = await listWorkspaceInvitations(request.workspaceId!);

@@ -1,9 +1,12 @@
 import cookie from "@fastify/cookie";
 import cors, { type FastifyCorsOptions } from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import websocket from "@fastify/websocket";
 import fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { env } from "./config/env.js";
 import { errorHandler } from "./error-handler.js";
+import { redisClient } from "./redis-client.js";
+import { RateLimitExceededError } from "./rate-limit.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { conversationRoutes } from "./modules/conversations/conversation.routes.js";
 import { integrationRoutes } from "./modules/integrations/integration.routes.js";
@@ -54,6 +57,30 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   });
   app.register(websocket);
+  // A generous, IP-keyed default across every route - the real
+  // protection for cost-incurring/abuse-prone endpoints (auth,
+  // knowledge ingestion, invitations, WS messages) is the tighter,
+  // workspace-keyed limits registered per-route below and in
+  // rate-limit.ts; this is the floor everything else gets for free.
+  // Backed by the shared Redis instance (redis-client.ts) so the limit
+  // holds correctly if this ever runs as more than one API instance.
+  app.register(rateLimit, {
+    global: true,
+    max: 300,
+    timeWindow: "1 minute",
+    redis: redisClient,
+    nameSpace: "csa-rl-global-",
+    // The plugin's own default throws a plain Error carrying only
+    // `.statusCode` (no `.code`) - error-handler.ts's Fastify-error
+    // branch deliberately only trusts errors with an `FST_`-prefixed
+    // code (a past fix, after a third-party SDK's own unrelated
+    // `statusCode` field nearly leaked through that same branch), so a
+    // plain Error here would silently collapse to a generic 500 instead
+    // of a 429. Returning our own AppError subclass instead routes it
+    // through the existing, already-correct AppError branch - no need
+    // to broaden error-handler.ts itself.
+    errorResponseBuilder: () => new RateLimitExceededError(),
+  });
 
   app.get("/health", async () => ({ status: "ok" }));
 

@@ -5,6 +5,8 @@ import type { WorkspaceRole } from "@csa/shared";
 import { requireRole } from "../auth/require-role.js";
 import { requireSession } from "../auth/require-session.js";
 import { AppError } from "../../errors.js";
+import { rateLimitByWorkspace } from "../../rate-limit.js";
+import { redisClient } from "../../redis-client.js";
 import {
   createKnowledgeSource,
   createKnowledgeSourceFromUpload,
@@ -41,6 +43,14 @@ const MANAGE_KNOWLEDGE_ROLES: WorkspaceRole[] = ["owner", "administrator"];
 
 const MAX_UPLOAD_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 
+// Every ingestion route makes at least one paid embedding-API call
+// (per Phase 2's batching principle) - website ingestion also makes a
+// real outbound fetch per URL. Keyed by workspace, not IP, since the
+// thing being protected is a workspace's own cost exposure, not a
+// single client's request volume - a whole office sharing one IP
+// shouldn't share (or multiply) the limit oddly.
+const INGESTION_RATE_LIMIT = rateLimitByWorkspace(redisClient, "knowledge-ingest", 30, 60 * 60);
+
 // Dashboard-facing: session-cookie authenticated, same as workspace.routes.ts.
 export async function knowledgeRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireSession);
@@ -48,7 +58,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
   // Scoped to this plugin only - no other route needs multipart parsing.
   app.register(multipart, { limits: { fileSize: MAX_UPLOAD_FILE_SIZE_BYTES } });
 
-  app.post("/knowledge/sources/upload", async (request, reply) => {
+  app.post("/knowledge/sources/upload", { preHandler: INGESTION_RATE_LIMIT }, async (request, reply) => {
     requireRole(
       request.sessionUser!.role,
       MANAGE_KNOWLEDGE_ROLES,
@@ -84,7 +94,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     reply.code(201).send({ source });
   });
 
-  app.post("/knowledge/sources/website", async (request, reply) => {
+  app.post("/knowledge/sources/website", { preHandler: INGESTION_RATE_LIMIT }, async (request, reply) => {
     requireRole(
       request.sessionUser!.role,
       MANAGE_KNOWLEDGE_ROLES,
@@ -98,7 +108,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     reply.code(201).send({ sources, skipped });
   });
 
-  app.post("/knowledge/sources", async (request, reply) => {
+  app.post("/knowledge/sources", { preHandler: INGESTION_RATE_LIMIT }, async (request, reply) => {
     requireRole(
       request.sessionUser!.role,
       MANAGE_KNOWLEDGE_ROLES,

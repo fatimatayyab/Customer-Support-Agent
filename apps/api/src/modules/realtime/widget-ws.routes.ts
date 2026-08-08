@@ -2,9 +2,22 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { WebSocket } from "ws";
 import { z } from "zod";
 import { handleCustomerMessage, initiateConversation } from "../../orchestrator/support-orchestrator.js";
+import { checkRateLimit, RateLimitExceededError } from "../../rate-limit.js";
+import { redisClient } from "../../redis-client.js";
 import { requireApiKey } from "../workspace-identification/require-api-key.js";
 import { publishToConversation, subscribe, unsubscribe } from "./conversation-hub.js";
 import { issueWidgetWsTicket, verifyWidgetWsTicket } from "./widget-ws-ticket.js";
+
+// The actual AI-cost trigger point in this whole codebase: every
+// message:send that reaches an unassigned conversation fires a real
+// AI-generation call (support-orchestrator.ts). @fastify/rate-limit
+// can't reach this - it's a WebSocket message, not an HTTP request -
+// so this is checked directly, keyed per-conversation rather than
+// per-workspace: the risk is one runaway/malicious client script in a
+// single chat, not a workspace's overall volume (which the knowledge-
+// ingestion limit already treats differently, since that's about a
+// workspace's own uploads, not one customer's chat behavior).
+const WS_MESSAGE_RATE_LIMIT = { max: 20, windowSeconds: 60 };
 
 const initiateMessageSchema = z.object({
   type: z.literal("conversation:initiate"),
@@ -101,6 +114,12 @@ async function handleConnection(socket: WebSocket, request: FastifyRequest): Pro
       }
 
       if (message.type === "message:send") {
+        await checkRateLimit(
+          redisClient,
+          `rl:ws-message:${message.payload.conversationId}`,
+          WS_MESSAGE_RATE_LIMIT.max,
+          WS_MESSAGE_RATE_LIMIT.windowSeconds,
+        );
         await handleCustomerMessage({ workspaceId, ...message.payload });
         return;
       }
@@ -108,6 +127,12 @@ async function handleConnection(socket: WebSocket, request: FastifyRequest): Pro
       // typing:start / typing:stop - ephemeral, not persisted.
       publishToConversation(message.payload.conversationId, { type: message.type, payload: {} }, socket);
     } catch (error) {
+      if (error instanceof RateLimitExceededError) {
+        // Expected, routine rejection under abuse/bug conditions - not
+        // an application error, so it doesn't get logged as one.
+        send(socket, { type: "error", payload: { message: error.message } });
+        return;
+      }
       send(socket, { type: "error", payload: { message: "Something went wrong." } });
       request.log.error(error);
     }
