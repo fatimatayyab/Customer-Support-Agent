@@ -3,7 +3,7 @@ import { identifyWorkspace, type IdentifiedWorkspace } from "./api.js";
 import { ChatPanel } from "./ChatPanel.js";
 import type { WidgetConfig } from "./config.js";
 import { getStoredConversationId, getStoredCustomerId, storeConversation } from "./storage.js";
-import { ChatConnection, type IncomingEvent, type WireMessage } from "./ws-client.js";
+import { ChatConnection, type ConversationRatingValue, type IncomingEvent, type WireMessage } from "./ws-client.js";
 
 type IdentifyStatus =
   | { state: "loading" }
@@ -18,6 +18,7 @@ export function Widget({ config }: { config: WidgetConfig }) {
   const [messages, setMessages] = useState<WireMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [typing, setTyping] = useState(false);
+  const [rating, setRating] = useState<ConversationRatingValue | null>(null);
   const connectionRef = useRef<ChatConnection | null>(null);
 
   useEffect(() => {
@@ -44,6 +45,13 @@ export function Widget({ config }: { config: WidgetConfig }) {
           setConversationId(event.payload.conversation.id);
           setMessages(event.payload.messages);
           storeConversation(event.payload.customer.id, event.payload.conversation.id);
+          // Not restored from any prior submission - initiateConversation's
+          // response doesn't carry an existing rating (a deliberate v1
+          // simplification, see docs/07's CSAT milestone notes), so a
+          // resumed conversation always starts looking unrated even if one
+          // was already given. Harmless: rateConversation upserts, so
+          // rating again just re-confirms the same value.
+          setRating(null);
           break;
         case "message:receive":
           setMessages((previous) => [...previous, event.payload]);
@@ -93,6 +101,20 @@ export function Widget({ config }: { config: WidgetConfig }) {
     connectionRef.current?.send(isTyping ? "typing:start" : "typing:stop", { conversationId });
   }
 
+  function handleRate(value: ConversationRatingValue) {
+    if (!conversationId) {
+      return;
+    }
+    // Confirmed, not optimistic: the button only reflects the new rating
+    // once the PATCH actually succeeds. A failed submit just leaves the
+    // buttons as they were - no retry/error UI for a first pass, the
+    // customer can simply tap again.
+    connectionRef.current?.rateConversation(conversationId, value).then(
+      () => setRating(value),
+      () => {},
+    );
+  }
+
   if (identify.state !== "ready") {
     return (
       <div class="bubble">
@@ -117,6 +139,9 @@ export function Widget({ config }: { config: WidgetConfig }) {
       reconnecting={reconnecting}
       messages={messages}
       typing={typing}
+      canRate={conversationId !== null}
+      rating={rating}
+      onRate={handleRate}
       onSend={handleSend}
       onTyping={handleTyping}
       onClose={() => setOpen(false)}

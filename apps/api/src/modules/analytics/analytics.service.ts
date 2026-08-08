@@ -3,9 +3,11 @@ import {
   getAiMessageStats,
   getConversationStatusBreakdown,
   getConversationVolumeByDay,
+  getCsatBreakdown,
   getEscalationReasonBreakdown,
   getTopCitedKnowledgeSources,
   type AiMessageStats,
+  type CsatCount,
   type EscalationReasonCount,
   type StatusCount,
   type TopCitedSource,
@@ -32,12 +34,20 @@ export interface AnalyticsOverview {
   escalationReasonBreakdown: EscalationReasonCount[];
   aiStats: AiMessageStats;
   topCitedSources: TopCitedSource[];
+  // Denominator is ratings submitted, not total conversations - most
+  // conversations never get rated, so scoring against totalConversations
+  // would silently understate a workspace that's actually doing well.
+  totalRatings: number;
+  csatScore: number | null;
+  csatBreakdown: CsatCount[];
 }
 
 // Read-only aggregation over data every prior phase already writes -
 // conversations.status/metadata, messages.metadata (AI replies), and
-// knowledge_chunks citations. No new tables; see docs/07's Improve
-// milestone entry for the schema-vs-CSAT scoping discussion.
+// knowledge_chunks citations - plus, as of the CSAT milestone,
+// conversation_ratings (the one genuinely new capture surface Improve
+// needed; everything else here reads data that already existed). See
+// docs/07's Improve milestone entries for the full scoping discussion.
 export async function getAnalyticsOverview(workspaceId: string, rangeDays: number): Promise<AnalyticsOverview> {
   const since = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
 
@@ -46,14 +56,15 @@ export async function getAnalyticsOverview(workspaceId: string, rangeDays: numbe
   // doesn't support concurrent queries on a single client (issuing them
   // concurrently just queues internally while logging a deprecation
   // warning today, and is slated to become a hard error in pg@9).
-  const { volumeByDay, statusBreakdown, escalationReasonBreakdown, aiStats, topCitedSources } =
+  const { volumeByDay, statusBreakdown, escalationReasonBreakdown, aiStats, topCitedSources, csatBreakdown } =
     await withWorkspaceContext(workspaceId, async (scopedDb) => {
       const volumeByDay = await getConversationVolumeByDay(scopedDb, workspaceId, since);
       const statusBreakdown = await getConversationStatusBreakdown(scopedDb, workspaceId, since);
       const escalationReasonBreakdown = await getEscalationReasonBreakdown(scopedDb, workspaceId, since);
       const aiStats = await getAiMessageStats(scopedDb, workspaceId, since);
       const topCitedSources = await getTopCitedKnowledgeSources(scopedDb, workspaceId, since, TOP_CITED_SOURCES_LIMIT);
-      return { volumeByDay, statusBreakdown, escalationReasonBreakdown, aiStats, topCitedSources };
+      const csatBreakdown = await getCsatBreakdown(scopedDb, workspaceId, since);
+      return { volumeByDay, statusBreakdown, escalationReasonBreakdown, aiStats, topCitedSources, csatBreakdown };
     });
 
   const totalConversations = statusBreakdown.reduce((sum, row) => sum + row.count, 0);
@@ -61,6 +72,9 @@ export async function getAnalyticsOverview(workspaceId: string, rangeDays: numbe
     .filter((row) => RESOLVED_STATUSES.has(row.status))
     .reduce((sum, row) => sum + row.count, 0);
   const escalatedCount = escalationReasonBreakdown.reduce((sum, row) => sum + row.count, 0);
+
+  const totalRatings = csatBreakdown.reduce((sum, row) => sum + row.count, 0);
+  const upCount = csatBreakdown.find((row) => row.rating === "up")?.count ?? 0;
 
   return {
     rangeDays,
@@ -72,5 +86,8 @@ export async function getAnalyticsOverview(workspaceId: string, rangeDays: numbe
     escalationReasonBreakdown,
     aiStats,
     topCitedSources,
+    totalRatings,
+    csatScore: totalRatings > 0 ? upCount / totalRatings : null,
+    csatBreakdown,
   };
 }

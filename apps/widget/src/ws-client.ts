@@ -18,6 +18,8 @@ export interface WireCustomer {
   id: string;
 }
 
+export type ConversationRatingValue = "up" | "down";
+
 export type IncomingEvent =
   | { type: "conversation:initiated"; payload: { customer: WireCustomer; conversation: WireConversation; messages: WireMessage[] } }
   | { type: "message:receive"; payload: WireMessage }
@@ -155,6 +157,23 @@ export class ChatConnection {
 
   send(type: string, payload: unknown): void {
     this.ws?.send(JSON.stringify({ type, payload }));
+  }
+
+  // A plain REST call, not a WS message - a rating isn't a live event
+  // anything else needs to react to in real time, so it doesn't need the
+  // socket at all (same reasoning startHandshake() above already uses
+  // fetch instead of the socket for the ticket exchange). Upsert on the
+  // server side (conversation-rating.repository.ts) makes this safely
+  // callable more than once for the same conversation.
+  async rateConversation(conversationId: string, rating: ConversationRatingValue): Promise<void> {
+    const response = await fetch(`${this.config.apiUrl}/widget/conversations/${conversationId}/rating`, {
+      method: "PATCH",
+      headers: { "X-API-Key": this.config.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ rating }),
+    });
+    if (!response.ok) {
+      throw new Error("Could not submit rating.");
+    }
   }
 
   close(): void {

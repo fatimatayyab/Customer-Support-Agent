@@ -111,6 +111,35 @@
   padding: 4px 12px;
 }
 
+.panel-rating {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid #e2e8f0;
+  background: white;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.rating-button {
+  all: unset;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.rating-button:hover {
+  background: #f1f5f9;
+}
+
+.rating-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .panel-input {
   display: flex;
   gap: 8px;

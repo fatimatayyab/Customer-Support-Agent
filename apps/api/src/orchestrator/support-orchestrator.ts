@@ -12,6 +12,10 @@ import {
 import { NO_RELEVANT_KNOWLEDGE_MESSAGE, PROVIDER_ERROR_MESSAGE } from "../modules/ai/prompts/fallback-messages.js";
 import { insertConversationNote } from "../modules/conversations/conversation-note.repository.js";
 import {
+  upsertConversationRating,
+  type ConversationRatingValue,
+} from "../modules/conversations/conversation-rating.repository.js";
+import {
   assignConversation,
   escalateConversation,
   getConversationById,
@@ -546,4 +550,30 @@ export async function lookupContact(
   }
 
   return outcome.result;
+}
+
+// --- Customer Satisfaction (Improve) ---
+
+/**
+ * Customer-facing, widget-triggered - unlike claimConversation/
+ * changeConversationStatus/etc. above, the caller here is the customer's
+ * own browser (conversation-rating.routes.ts, API-key authenticated),
+ * not a logged-in agent. Still goes through the Orchestrator rather than
+ * a route-to-repository shortcut, matching initiateConversation/
+ * handleCustomerMessage's precedent for every widget-facing write: the
+ * conversationId is client-supplied and gets looked up against this
+ * workspace before use, never trusted at face value.
+ */
+export async function rateConversation(
+  workspaceId: string,
+  conversationId: string,
+  rating: ConversationRatingValue,
+): Promise<void> {
+  await withWorkspaceContext(workspaceId, async (scopedDb) => {
+    const conversation = await getConversationById(scopedDb, workspaceId, conversationId);
+    if (!conversation) {
+      throw new NotFoundError("Conversation not found.");
+    }
+    await upsertConversationRating(scopedDb, { workspaceId, conversationId, rating });
+  });
 }

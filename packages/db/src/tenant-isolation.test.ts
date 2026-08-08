@@ -171,6 +171,15 @@ const fixtures: Record<string, FixtureBuilder> = {
     return must(log, "integration_action_logs fixture: INSERT ... RETURNING produced no row.");
   },
 
+  conversation_ratings: async (scopedDb, workspaceId) => {
+    const conversation = await insertMinimalConversation(scopedDb, workspaceId);
+    const [rating] = await scopedDb
+      .insert(schema.conversationRatings)
+      .values({ workspaceId, conversationId: conversation.id, rating: "up" })
+      .returning();
+    return must(rating, "conversation_ratings fixture: INSERT ... RETURNING produced no row.");
+  },
+
   invitations: async (scopedDb, workspaceId) => {
     const user = await insertMinimalUser(scopedDb, workspaceId);
     const [invitation] = await scopedDb

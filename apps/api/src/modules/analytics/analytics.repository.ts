@@ -1,5 +1,5 @@
 import { and, eq, gte, sql } from "drizzle-orm";
-import { conversations, knowledgeSources, messages, type ScopedDb } from "@csa/db";
+import { conversationRatings, conversations, knowledgeSources, messages, type ScopedDb } from "@csa/db";
 import { assertDefined } from "../../assert.js";
 
 export interface VolumeByDay {
@@ -70,6 +70,22 @@ export async function getEscalationReasonBreakdown(
       and(eq(conversations.workspaceId, workspaceId), gte(conversations.createdAt, since), sql`${reason} is not null`),
     )
     .groupBy(reason);
+}
+
+export interface CsatCount {
+  rating: string;
+  count: number;
+}
+
+// Filtered on the rating's own createdAt (when it was submitted), not
+// the conversation's - consistent with how every other breakdown here
+// filters on the timestamp of the thing actually being counted.
+export async function getCsatBreakdown(scopedDb: ScopedDb, workspaceId: string, since: Date): Promise<CsatCount[]> {
+  return scopedDb
+    .select({ rating: conversationRatings.rating, count: sql<number>`count(*)::int` })
+    .from(conversationRatings)
+    .where(and(eq(conversationRatings.workspaceId, workspaceId), gte(conversationRatings.createdAt, since)))
+    .groupBy(conversationRatings.rating);
 }
 
 export interface AiProviderStats {

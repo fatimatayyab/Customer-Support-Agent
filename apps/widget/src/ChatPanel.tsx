@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { WireMessage } from "./ws-client.js";
+import type { ConversationRatingValue, WireMessage } from "./ws-client.js";
 
 const TYPING_STOP_DELAY_MS = 2000;
 
@@ -9,6 +9,9 @@ interface ChatPanelProps {
   reconnecting: boolean;
   messages: WireMessage[];
   typing: boolean;
+  canRate: boolean;
+  rating: ConversationRatingValue | null;
+  onRate: (rating: ConversationRatingValue) => void;
   onSend: (content: string) => void;
   onTyping: (isTyping: boolean) => void;
   onClose: () => void;
@@ -20,6 +23,9 @@ export function ChatPanel({
   reconnecting,
   messages,
   typing,
+  canRate,
+  rating,
+  onRate,
   onSend,
   onTyping,
   onClose,
@@ -73,6 +79,36 @@ export function ChatPanel({
         ))}
         {typing && <div class="typing-indicator">...</div>}
       </div>
+
+      {canRate && (
+        <div class="panel-rating">
+          {rating ? (
+            <span>Thanks for your feedback!</span>
+          ) : (
+            <>
+              <span>Rate this chat:</span>
+              <button
+                type="button"
+                class="rating-button"
+                onClick={() => onRate("up")}
+                disabled={!connected}
+                aria-label="Good"
+              >
+                👍
+              </button>
+              <button
+                type="button"
+                class="rating-button"
+                onClick={() => onRate("down")}
+                disabled={!connected}
+                aria-label="Not good"
+              >
+                👎
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <form class="panel-input" onSubmit={handleSubmit}>
         <input

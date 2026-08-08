@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { conversations, messages, withWorkspaceContext } from "@csa/db";
+import { conversationRatings, conversations, messages, withWorkspaceContext } from "@csa/db";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { escalateConversation, updateConversationStatus } from "../conversations/conversation.repository.js";
 import { insertMessage, type AiMessageMetadata } from "../conversations/message.repository.js";
 import { insertKnowledgeSource } from "../knowledge/knowledge-source.repository.js";
+import { rateConversation } from "../../orchestrator/support-orchestrator.js";
 import { createConversation, createWorkspace } from "../../test-support/fixtures.js";
 import { resetDatabase } from "../../test-support/reset-database.js";
 import { getAnalyticsOverview } from "./analytics.service.js";
@@ -57,6 +58,9 @@ describe("getAnalyticsOverview", () => {
     expect(overview.aiStats.totalAiMessages).toBe(0);
     expect(overview.aiStats.avgConfidence).toBeNull();
     expect(overview.topCitedSources).toEqual([]);
+    expect(overview.totalRatings).toBe(0);
+    expect(overview.csatScore).toBeNull();
+    expect(overview.csatBreakdown).toEqual([]);
   });
 
   it("breaks down conversations by status and computes a resolution rate", async () => {
@@ -194,7 +198,38 @@ describe("getAnalyticsOverview", () => {
     ]);
   });
 
-  it("excludes conversations and messages older than the requested day range", async () => {
+  it("computes a CSAT score and breakdown from submitted ratings", async () => {
+    const workspace = await createWorkspace();
+    const up1 = await createConversation(workspace.id);
+    const up2 = await createConversation(workspace.id);
+    const down1 = await createConversation(workspace.id);
+    await rateConversation(workspace.id, up1.id, "up");
+    await rateConversation(workspace.id, up2.id, "up");
+    await rateConversation(workspace.id, down1.id, "down");
+
+    const overview = await getAnalyticsOverview(workspace.id, 30);
+
+    expect(overview.totalRatings).toBe(3);
+    expect(overview.csatScore).toBeCloseTo(2 / 3);
+    const byRating = Object.fromEntries(overview.csatBreakdown.map((row) => [row.rating, row.count]));
+    expect(byRating).toEqual({ up: 2, down: 1 });
+  });
+
+  it("re-rating the same conversation updates the score rather than double-counting", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    await rateConversation(workspace.id, conversation.id, "up");
+    await rateConversation(workspace.id, conversation.id, "down");
+
+    const overview = await getAnalyticsOverview(workspace.id, 30);
+
+    expect(overview.totalRatings).toBe(1);
+    expect(overview.csatScore).toBe(0);
+    expect(overview.csatBreakdown).toEqual([{ rating: "down", count: 1 }]);
+  });
+
+  it("excludes conversations, messages, and ratings older than the requested day range", async () => {
     const workspace = await createWorkspace();
     const oldConversation = await createConversation(workspace.id);
     await createConversation(workspace.id);
@@ -207,19 +242,28 @@ describe("getAnalyticsOverview", () => {
     await withWorkspaceContext(workspace.id, (scopedDb) =>
       scopedDb.update(messages).set({ createdAt: longAgo }).where(eq(messages.id, oldMessage.id)),
     );
+    await rateConversation(workspace.id, oldConversation.id, "up");
+    await withWorkspaceContext(workspace.id, (scopedDb) =>
+      scopedDb
+        .update(conversationRatings)
+        .set({ createdAt: longAgo })
+        .where(eq(conversationRatings.conversationId, oldConversation.id)),
+    );
 
     const overview = await getAnalyticsOverview(workspace.id, 30);
 
     expect(overview.totalConversations).toBe(1);
     expect(overview.aiStats.totalAiMessages).toBe(0);
+    expect(overview.totalRatings).toBe(0);
   });
 
   describe("tenant isolation", () => {
-    it("a workspace's overview never includes another workspace's conversations or AI messages", async () => {
+    it("a workspace's overview never includes another workspace's conversations, AI messages, or ratings", async () => {
       const workspaceA = await createWorkspace();
       const workspaceB = await createWorkspace();
       const conversationA = await createConversation(workspaceA.id);
       await insertAiMessage(workspaceA.id, conversationA.id);
+      await rateConversation(workspaceA.id, conversationA.id, "up");
       await withWorkspaceContext(workspaceA.id, (scopedDb) =>
         escalateConversation(scopedDb, workspaceA.id, conversationA.id, { reason: "no_relevant_knowledge", detail: "x" }),
       );
@@ -229,6 +273,7 @@ describe("getAnalyticsOverview", () => {
       expect(overviewB.totalConversations).toBe(0);
       expect(overviewB.aiStats.totalAiMessages).toBe(0);
       expect(overviewB.escalationReasonBreakdown).toEqual([]);
+      expect(overviewB.totalRatings).toBe(0);
     });
   });
 });

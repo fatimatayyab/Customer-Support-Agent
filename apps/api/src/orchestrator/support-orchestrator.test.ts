@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { integrationActionLogs, withWorkspaceContext } from "@csa/db";
+import { conversationRatings, integrationActionLogs, withWorkspaceContext } from "@csa/db";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NotFoundError } from "../errors.js";
@@ -24,6 +24,7 @@ import {
   handleCustomerMessage,
   initiateConversation,
   lookupContact,
+  rateConversation,
   sendAgentMessage,
   suggestReplyForAgent,
   summarizeConversationForAgent,
@@ -526,6 +527,43 @@ describe("lookupContact", () => {
       scopedDb.select().from(integrationActionLogs).where(eq(integrationActionLogs.workspaceId, workspace.id)),
     );
     expect(logs).toHaveLength(0);
+  });
+});
+
+describe("rateConversation", () => {
+  it("persists a rating for a real conversation", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    await rateConversation(workspace.id, conversation.id, "up");
+
+    const rows = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      scopedDb.select().from(conversationRatings).where(eq(conversationRatings.conversationId, conversation.id)),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.rating).toBe("up");
+  });
+
+  it("upserts rather than duplicating when the same conversation is rated again", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    await rateConversation(workspace.id, conversation.id, "up");
+    await rateConversation(workspace.id, conversation.id, "down");
+
+    const rows = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      scopedDb.select().from(conversationRatings).where(eq(conversationRatings.conversationId, conversation.id)),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.rating).toBe("down");
+  });
+
+  it("rejects a conversation id that doesn't belong to the workspace", async () => {
+    const workspaceA = await createWorkspace();
+    const workspaceB = await createWorkspace();
+    const conversationA = await createConversation(workspaceA.id);
+
+    await expect(rateConversation(workspaceB.id, conversationA.id, "up")).rejects.toThrow(NotFoundError);
   });
 });
 

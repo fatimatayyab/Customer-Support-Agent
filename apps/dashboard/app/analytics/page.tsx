@@ -47,6 +47,11 @@ interface TopCitedSource {
   citationCount: number;
 }
 
+interface CsatCount {
+  rating: string;
+  count: number;
+}
+
 interface AnalyticsOverview {
   rangeDays: number;
   totalConversations: number;
@@ -57,6 +62,9 @@ interface AnalyticsOverview {
   escalationReasonBreakdown: EscalationReasonCount[];
   aiStats: AiStats;
   topCitedSources: TopCitedSource[];
+  totalRatings: number;
+  csatScore: number | null;
+  csatBreakdown: CsatCount[];
 }
 
 const RANGE_OPTIONS = [7, 30, 90] as const;
@@ -75,6 +83,11 @@ const ESCALATION_REASON_LABELS: Record<string, string> = {
   low_confidence: "Low confidence",
   ai_requested_escalation: "AI requested escalation",
   ai_provider_error: "AI provider error",
+};
+
+const CSAT_LABELS: Record<string, string> = {
+  up: "Positive",
+  down: "Negative",
 };
 
 function formatPercent(value: number | null): string {
@@ -135,10 +148,11 @@ export default function AnalyticsPage() {
 
       {overview && (
         <div className="flex flex-col gap-10">
-          <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <section className="grid grid-cols-2 gap-4 sm:grid-cols-5">
             <StatTile label="Conversations" value={String(overview.totalConversations)} />
             <StatTile label="Resolution rate" value={formatPercent(overview.resolutionRate)} />
             <StatTile label="Escalation rate" value={formatPercent(overview.escalationRate)} />
+            <StatTile label="Customer satisfaction" value={formatPercent(overview.csatScore)} />
             <StatTile
               label="Avg. AI confidence"
               value={overview.aiStats.avgConfidence === null ? "—" : overview.aiStats.avgConfidence.toFixed(2)}
@@ -176,6 +190,20 @@ export default function AnalyticsPage() {
               <BarList
                 items={overview.escalationReasonBreakdown.map((row) => ({
                   label: ESCALATION_REASON_LABELS[row.reason] ?? row.reason,
+                  value: row.count,
+                }))}
+              />
+            )}
+          </section>
+
+          <section>
+            <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Customer satisfaction</h2>
+            {overview.totalRatings === 0 ? (
+              <p className="text-sm text-slate-500">No ratings in this range.</p>
+            ) : (
+              <BarList
+                items={overview.csatBreakdown.map((row) => ({
+                  label: CSAT_LABELS[row.rating] ?? row.rating,
                   value: row.count,
                 }))}
               />
