@@ -6,6 +6,7 @@ const TYPING_STOP_DELAY_MS = 2000;
 interface ChatPanelProps {
   workspaceName: string;
   connected: boolean;
+  reconnecting: boolean;
   messages: WireMessage[];
   typing: boolean;
   onSend: (content: string) => void;
@@ -13,7 +14,16 @@ interface ChatPanelProps {
   onClose: () => void;
 }
 
-export function ChatPanel({ workspaceName, connected, messages, typing, onSend, onTyping, onClose }: ChatPanelProps) {
+export function ChatPanel({
+  workspaceName,
+  connected,
+  reconnecting,
+  messages,
+  typing,
+  onSend,
+  onTyping,
+  onClose,
+}: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const typingTimeoutRef = useRef<number | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -55,7 +65,7 @@ export function ChatPanel({ workspaceName, connected, messages, typing, onSend, 
       </header>
 
       <div class="panel-messages" ref={scrollRef}>
-        {!connected && <p class="panel-status">Connecting...</p>}
+        {!connected && <p class="panel-status">{reconnecting ? "Reconnecting..." : "Connecting..."}</p>}
         {messages.map((message) => (
           <div key={message.id} class={`message message-${message.senderType}`}>
             {message.content}

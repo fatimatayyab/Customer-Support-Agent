@@ -14,6 +14,7 @@ export function Widget({ config }: { config: WidgetConfig }) {
   const [identify, setIdentify] = useState<IdentifyStatus>({ state: "loading" });
   const [open, setOpen] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [messages, setMessages] = useState<WireMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [typing, setTyping] = useState(false);
@@ -52,6 +53,14 @@ export function Widget({ config }: { config: WidgetConfig }) {
           break;
         case "typing:stop":
           setTyping(false);
+          break;
+        case "connection:reconnecting":
+          setConnected(false);
+          setReconnecting(true);
+          break;
+        case "connection:restored":
+          setConnected(true);
+          setReconnecting(false);
           break;
       }
     });
@@ -105,6 +114,7 @@ export function Widget({ config }: { config: WidgetConfig }) {
     <ChatPanel
       workspaceName={identify.workspace.name}
       connected={connected}
+      reconnecting={reconnecting}
       messages={messages}
       typing={typing}
       onSend={handleSend}

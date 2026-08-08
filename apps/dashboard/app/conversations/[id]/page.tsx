@@ -37,6 +37,7 @@ export default function ConversationDetailPage() {
   const [messages, setMessages] = useState<WireMessage[]>([]);
   const [notes, setNotes] = useState<ConversationNote[]>([]);
   const [connected, setConnected] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState("");
   const [noteDraft, setNoteDraft] = useState("");
@@ -82,6 +83,12 @@ export default function ConversationDetailPage() {
         setTyping(true);
       } else if (event.type === "typing:stop") {
         setTyping(false);
+      } else if (event.type === "connection:reconnecting") {
+        setConnected(false);
+        setReconnecting(true);
+      } else if (event.type === "connection:restored") {
+        setConnected(true);
+        setReconnecting(false);
       }
     });
 
@@ -266,7 +273,7 @@ export default function ConversationDetailPage() {
         </div>
 
         <div ref={scrollRef} className="mb-3 h-96 overflow-y-auto rounded-md border border-slate-200 p-3">
-          {!connected && <p className="text-sm text-slate-500">Connecting...</p>}
+          {!connected && <p className="text-sm text-slate-500">{reconnecting ? "Reconnecting..." : "Connecting..."}</p>}
           {messages.map((message) => (
             <div key={message.id} className="mb-2 text-sm">
               <span className="font-medium">{message.senderName ?? message.senderType}: </span>
