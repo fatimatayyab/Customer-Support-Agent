@@ -12,3 +12,4 @@ export * from "./vector-type.js";
 export * from "./integrations.js";
 export * from "./integration-action-logs.js";
 export * from "./invitations.js";
+export * from "./workspace-signup-invites.js";

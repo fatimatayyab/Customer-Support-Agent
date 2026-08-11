@@ -1,9 +1,18 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
+export interface ApiValidationIssue {
+  path: (string | number)[];
+  message: string;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    // Present only for a 400 from a Zod validation failure (error-
+    // handler.ts's ZodError branch) - lets a caller show which field
+    // was wrong and why, instead of just the generic "Invalid request."
+    public readonly issues?: ApiValidationIssue[],
   ) {
     super(message);
   }
@@ -22,7 +31,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T |
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new ApiError(body.error ?? "Request failed.", response.status);
+    throw new ApiError(body.error ?? "Request failed.", response.status, body.issues);
   }
 
   if (response.status === 204) {

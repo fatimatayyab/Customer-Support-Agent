@@ -9,6 +9,9 @@ const signUpSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(200),
   name: z.string().min(1).max(100),
+  // Workspace creation is invite-gated (docs/07's "Invite-Only Workspace
+  // Signup" entry) - required, not optional, at the schema level.
+  inviteToken: z.string().min(1),
 });
 
 const logInSchema = z.object({

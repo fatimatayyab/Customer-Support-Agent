@@ -191,6 +191,7 @@ Built (Phase 3), at `apps/api/src/modules/ai/`. What it must and must never do i
 - **Rate limiting** covers login/signup (`@fastify/rate-limit`, IP-keyed, per-route config in `auth.routes.ts`), knowledge ingestion and invitation creation (workspace-keyed via `rateLimitByWorkspace`, `apps/api/src/rate-limit.ts`), and the WS `message:send` path (conversation-keyed, checked inline — `@fastify/rate-limit` can't reach a WebSocket message). Backed by the shared Redis client (`redis-client.ts`) — its first real consumer. A new public-facing or cost-incurring endpoint (anything calling a paid external API) should get one of these two patterns, not ship unprotected by default now that the precedent exists.
 - Any new BYPASSRLS access path must be as narrow as `auth_resolver`'s — specific columns, specific tables, documented inline.
 - Never commit a real secret. Check `git status`/`git diff` for `.env`-shaped content before every commit, even when the filename looks safe.
+- **Workspace creation is invite-gated, not open self-serve.** `POST /auth/signup` requires a valid, single-use `workspace_signup_invites` token (docs/07's "Invite-Only Workspace Signup") — generate one via `pnpm invite <email>`, not by hand-crafting a request. Login is unaffected; this only gates creating a *new* workspace.
 
 ---
 

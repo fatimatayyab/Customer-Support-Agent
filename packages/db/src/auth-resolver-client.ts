@@ -1,8 +1,8 @@
 import { drizzle } from "drizzle-orm/node-postgres";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { Pool } from "pg";
 import { dbEnv } from "./env.js";
-import { invitations, workspaceApiKeys, workspaces } from "./schema/index.js";
+import { invitations, workspaceApiKeys, workspaceSignupInvites, workspaces } from "./schema/index.js";
 
 // Connects as auth_resolver (BYPASSRLS, granted SELECT on nothing but a
 // few columns of workspaces, workspace_api_keys, and invitations - see
@@ -14,7 +14,9 @@ import { invitations, workspaceApiKeys, workspaces } from "./schema/index.js";
 // has a tenant context to scope a normal query with. Nothing else should
 // use this client.
 const authResolverPool = new Pool({ connectionString: dbEnv.AUTH_RESOLVER_DATABASE_URL });
-const authResolverDb = drizzle(authResolverPool, { schema: { workspaceApiKeys, workspaces, invitations } });
+const authResolverDb = drizzle(authResolverPool, {
+  schema: { workspaceApiKeys, workspaces, invitations, workspaceSignupInvites },
+});
 
 export async function findApiKeyByHash(keyHash: string) {
   // Column list matches the migration's grant exactly (id, workspace_id,
@@ -58,6 +60,50 @@ export async function findWorkspaceNameById(workspaceId: string) {
     .limit(1);
 
   return row?.name ?? null;
+}
+
+// Read-only, for producing a specific "invalid / expired / already used /
+// wrong email" message before attempting the real claim below - mirrors
+// the invitations flow's own preview-then-accept split. This lookup is
+// never the security boundary by itself (see claimWorkspaceSignupInvite).
+export async function findWorkspaceSignupInviteByTokenHash(tokenHash: string) {
+  const [row] = await authResolverDb
+    .select({
+      id: workspaceSignupInvites.id,
+      email: workspaceSignupInvites.email,
+      expiresAt: workspaceSignupInvites.expiresAt,
+      usedAt: workspaceSignupInvites.usedAt,
+    })
+    .from(workspaceSignupInvites)
+    .where(eq(workspaceSignupInvites.tokenHash, tokenHash))
+    .limit(1);
+
+  return row ?? null;
+}
+
+// The actual single-use guarantee: one conditional UPDATE, the same
+// atomic-claim shape invitations.acceptInvitation already uses for team
+// invites (a separate read-then-write here would leave a real race
+// window between two concurrent signups holding the same token). Returns
+// true if this call is the one that claimed it, false if it was already
+// used/expired by the time this ran (including by a concurrent request
+// that won the race) - the caller can't tell those apart from the return
+// value alone, which is fine, since findWorkspaceSignupInviteByTokenHash
+// above already produced whatever specific message the caller is going
+// to show.
+export async function claimWorkspaceSignupInvite(tokenHash: string): Promise<boolean> {
+  const result = await authResolverDb
+    .update(workspaceSignupInvites)
+    .set({ usedAt: sql`now()` })
+    .where(
+      and(
+        eq(workspaceSignupInvites.tokenHash, tokenHash),
+        isNull(workspaceSignupInvites.usedAt),
+        gt(workspaceSignupInvites.expiresAt, sql`now()`),
+      ),
+    );
+
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function findInvitationByTokenHash(tokenHash: string) {

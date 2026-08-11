@@ -11,6 +11,7 @@
   },
   "scripts": {
     "bootstrap": "node scripts/setup.mjs",
+    "invite": "pnpm --filter @csa/db invite",
     "dev": "pnpm -r --parallel --if-present run dev",
     "dev:api": "pnpm --filter @csa/api dev",
     "dev:dashboard": "pnpm --filter @csa/dashboard dev",

@@ -1,24 +1,69 @@
 import { randomUUID } from "node:crypto";
-import { findWorkspaceBySlug, withWorkspaceContext } from "@csa/db";
+import {
+  claimWorkspaceSignupInvite,
+  findWorkspaceBySlug,
+  findWorkspaceSignupInviteByTokenHash,
+  withWorkspaceContext,
+} from "@csa/db";
 import type { SessionUser } from "@csa/shared";
-import { AuthError } from "../../errors.js";
+import { AuthError, NotFoundError } from "../../errors.js";
 import { getUserByEmail, insertUser } from "../users/user.repository.js";
 import { getWorkspaceById, insertWorkspace } from "../workspaces/workspace.repository.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { signSessionToken } from "./session-token.js";
 import { slugify, withRandomSuffix } from "./slugify.js";
+import { hashSignupInviteToken } from "./signup-invite-token.js";
 
 const MAX_SLUG_ATTEMPTS = 5;
 const UNIQUE_VIOLATION = "23505";
 
-export async function signUp(params: { workspaceName: string; email: string; password: string; name: string }) {
-  const workspaceId = randomUUID();
-  const baseSlug = slugify(params.workspaceName) || "workspace";
-  const passwordHash = await hashPassword(params.password);
+export async function signUp(params: {
+  workspaceName: string;
+  email: string;
+  password: string;
+  name: string;
+  inviteToken: string;
+}) {
   // Normalized once, here, so every email this system ever stores is
   // canonical form going forward - the invitation flow relies on this to
   // match against pending invites and existing accounts consistently.
   const email = params.email.trim().toLowerCase();
+
+  // Workspace creation is invite-gated, not open self-serve - see
+  // docs/07's "Invite-Only Workspace Signup" entry for why. The lookup
+  // below exists purely to produce a specific, honest error message
+  // (invalid / expired / already used / wrong email); the actual
+  // single-use guarantee is claimWorkspaceSignupInvite's atomic
+  // conditional UPDATE further down, not this read.
+  const inviteTokenHash = hashSignupInviteToken(params.inviteToken);
+  const invite = await findWorkspaceSignupInviteByTokenHash(inviteTokenHash);
+  if (!invite) {
+    throw new NotFoundError("This signup link is invalid.");
+  }
+  if (invite.usedAt) {
+    throw new NotFoundError("This signup link has already been used.");
+  }
+  if (invite.expiresAt.getTime() <= Date.now()) {
+    throw new NotFoundError("This signup link has expired.");
+  }
+  if (invite.email !== email) {
+    throw new NotFoundError("This signup link is for a different email address.");
+  }
+
+  const workspaceId = randomUUID();
+  const baseSlug = slugify(params.workspaceName) || "workspace";
+  const passwordHash = await hashPassword(params.password);
+
+  // The real guard: claims the invite atomically, so two concurrent
+  // signups holding the same token can't both pass the checks above and
+  // both create a workspace. Whichever request's UPDATE actually flips
+  // used_at wins; the other gets this same "no longer valid" rejection a
+  // completely stale token would - no way to tell the two apart from the
+  // response, and no need to (see claimWorkspaceSignupInvite's comment).
+  const claimed = await claimWorkspaceSignupInvite(inviteTokenHash);
+  if (!claimed) {
+    throw new NotFoundError("This signup link is no longer valid.");
+  }
 
   let attemptSlug = baseSlug;
 

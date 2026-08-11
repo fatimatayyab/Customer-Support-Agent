@@ -5,5 +5,7 @@ export {
   findWorkspaceBySlug,
   findWorkspaceNameById,
   findInvitationByTokenHash,
+  findWorkspaceSignupInviteByTokenHash,
+  claimWorkspaceSignupInvite,
 } from "./auth-resolver-client.js";
 export * from "./schema/index.js";
