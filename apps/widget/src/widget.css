@@ -25,6 +25,71 @@
   color: #fca5a5;
 }
 
+.config-prompt {
+  all: initial;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 280px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: white;
+  color: #0f172a;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  padding: 16px;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 13px;
+  z-index: 2147483000;
+}
+
+.config-prompt-title {
+  font-weight: 600;
+}
+
+.config-prompt-hint {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.config-prompt form {
+  display: flex;
+  gap: 8px;
+}
+
+.config-prompt input {
+  all: unset;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+  font-size: 12px;
+}
+
+.config-prompt button {
+  all: unset;
+  cursor: pointer;
+  background: #0f172a;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.config-prompt button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .panel {
   all: initial;
   position: fixed;

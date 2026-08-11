@@ -9,11 +9,13 @@
       This is a stand-in for an arbitrary customer's website that has embedded the AI Customer Support widget.
     </h1>
 
-    <!-- This is the actual embed snippet a real customer would paste. -->
-    <!-- Generate a key from the dashboard (Workspaces > API Keys) and drop it in below to try this locally. -->
+    <!-- This is the actual embed snippet a real customer would paste, apiKey included -
+         that's the real integration contract, not a local-dev convenience. Left blank
+         here on purpose: without apiKey set, the widget prompts for one on-page and
+         remembers it in this browser, so this file works unmodified too. To embed for
+         real, generate a key from the dashboard (Home -> API Keys) and set it below. -->
     <script>
       window.CSAWidgetConfig = {
-        apiKey: "REPLACE_WITH_A_REAL_WORKSPACE_API_KEY",
         apiUrl: "http://localhost:4000",
       };
     </script>

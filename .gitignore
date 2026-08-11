@@ -30,3 +30,4 @@ coverage/
 
 # Local-only reference doc, not part of the shared repo
 docs/Developer_Onboarding_Walkthrough.md
+HANDOFF.md

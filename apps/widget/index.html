@@ -6,11 +6,15 @@
   </head>
   <body>
     <p style="font-family: system-ui; padding: 20px">
-      This page simulates a third-party site embedding the widget during local development.
+      This page simulates a third-party site embedding the widget during local development. You'll see a small
+      "Widget not configured" box in the bottom-right corner - paste a workspace API key there (create one from the
+      dashboard: Home &rarr; API Keys) and the real chat bubble takes over.
     </p>
     <script>
+      // Deliberately no apiKey here - see ConfigPrompt.tsx. A real host
+      // page sets one; this dev harness prompts for it instead so you
+      // never have to hand-edit this file or a .env to test locally.
       window.CSAWidgetConfig = {
-        apiKey: "%VITE_WIDGET_API_KEY%",
         apiUrl: "http://localhost:4000",
       };
     </script>

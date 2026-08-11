@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { ApiError, apiFetch } from "../../lib/api";
 
-export default function LoginPage() {
+export default function SignupPage() {
   const router = useRouter();
-  const [workspaceSlug, setWorkspaceSlug] = useState("");
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -18,9 +19,9 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await apiFetch("/auth/login", {
+      await apiFetch("/auth/signup", {
         method: "POST",
-        body: JSON.stringify({ workspaceSlug, email, password }),
+        body: JSON.stringify({ workspaceName, name, email, password }),
       });
       router.push("/");
     } catch (err) {
@@ -32,24 +33,31 @@ export default function LoginPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4">
-      <h1 className="mb-6 text-xl font-semibold">Log in</h1>
+      <h1 className="mb-1 text-xl font-semibold">Create your workspace</h1>
+      <p className="mb-6 text-sm text-slate-500">You'll be signed in as the workspace owner.</p>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <Field label="Workspace" value={workspaceSlug} onChange={setWorkspaceSlug} placeholder="acme-support" />
+        <Field
+          label="Business / workspace name"
+          value={workspaceName}
+          onChange={setWorkspaceName}
+          placeholder="Acme Support"
+        />
+        <Field label="Your name" value={name} onChange={setName} placeholder="Jane Doe" />
         <Field label="Email" type="email" value={email} onChange={setEmail} />
-        <Field label="Password" type="password" value={password} onChange={setPassword} />
+        <Field label="Password" type="password" value={password} onChange={setPassword} placeholder="At least 8 characters" />
         {error && <p className="text-sm text-red-600">{error}</p>}
         <button
           type="submit"
           disabled={submitting}
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {submitting ? "Logging in..." : "Log in"}
+          {submitting ? "Creating..." : "Create workspace"}
         </button>
       </form>
       <p className="mt-4 text-sm text-slate-500">
-        New here?{" "}
-        <Link href="/signup" className="text-slate-900 underline">
-          Create a workspace
+        Already have a workspace?{" "}
+        <Link href="/login" className="text-slate-900 underline">
+          Log in
         </Link>
       </p>
     </main>
