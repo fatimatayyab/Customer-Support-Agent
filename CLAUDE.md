@@ -110,10 +110,12 @@ A new domain gets a new folder under `apps/api/src/modules/`. Don't add a top-le
 | **Support Orchestrator** | Business logic, workflow, application state, conversation lifecycle | Contain AI logic; call third-party APIs directly |
 | **AI Service** (`modules/ai`, built — Phase 3) | Intent understanding, response generation, tool selection, confidence scoring | Business rules, auth decisions, own state, touch the DB, call third parties directly |
 | **Knowledge Service** (`modules/knowledge`) | Ingestion, chunking, embedding, semantic search | Decide *when* to retrieve for a conversation — that's the Orchestrator's call |
-| **Integration Service** (`modules/integrations`, built — Phase 5, HubSpot contact lookup only) | The only thing that talks to external business systems, normalizes responses | Being called by anything other than the Orchestrator |
+| **Integration Service** (`modules/integrations`, built — Phase 5, HubSpot contact lookup only) | The only thing that talks to external *workspace-connected* business systems, normalizes responses | Being called by anything other than the Orchestrator |
 | **Realtime hub** (`modules/realtime`) | Connection tracking, message/typing fan-out | Persistence — it's a transport layer, not a data store |
 
 The Orchestrator is the only thing that talks to more than one of these in a single flow.
+
+**`modules/ops`** is deliberately not in this table — it's the platform's own internal escalation mirror (currently one Airtable base/table, `AIRTABLE_*` in `env.ts`), not a workspace-connectable Integration. One platform-wide singleton (mirrors `ai.service.ts`'s construction pattern, not `integration.service.ts`'s per-workspace one), invisible to every workspace's dashboard — no connect UI, no per-workspace credentials, no `integrations` row. Don't add a workspace-facing "connect" flow for it; if a genuinely *workspace-owned* escalation-sync destination is ever wanted, that's a new, separate feature in `modules/integrations`, not an extension of this one.
 
 ---
 

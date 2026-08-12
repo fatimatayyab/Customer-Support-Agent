@@ -7,7 +7,15 @@ export interface WireMessage {
   senderType: "customer" | "agent" | "system" | "ai";
   content: string;
   createdAt: string;
+  // Only present on a message tied to an escalation event (any of the 5
+  // EscalationReasons) - the signal ChatPanel uses to offer the contact
+  // form under that specific message. Same jsonb column as the AI
+  // provider/confidence fields, just a different subset - see
+  // message.repository.ts's MessageMetadata.
+  metadata?: { escalated?: boolean; escalationReason?: string } | null;
 }
+
+export type EscalationContactMethod = "email" | "phone";
 
 export interface WireConversation {
   id: string;
@@ -173,6 +181,25 @@ export class ChatConnection {
     });
     if (!response.ok) {
       throw new Error("Could not submit rating.");
+    }
+  }
+
+  // Same plain-REST shape as rateConversation above - a contact
+  // submission isn't a live event anything else needs to react to over
+  // the socket. Upsert on the server side (conversation-escalation-
+  // contact.repository.ts) makes this safely callable more than once for
+  // the same conversation (e.g. correcting a typo).
+  async submitEscalationContact(
+    conversationId: string,
+    contact: { name: string; contactMethod: EscalationContactMethod; contactValue: string },
+  ): Promise<void> {
+    const response = await fetch(`${this.config.apiUrl}/widget/conversations/${conversationId}/escalation-contact`, {
+      method: "PATCH",
+      headers: { "X-API-Key": this.config.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify(contact),
+    });
+    if (!response.ok) {
+      throw new Error("Could not submit contact details.");
     }
   }
 

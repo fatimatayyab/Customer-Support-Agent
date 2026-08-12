@@ -9,8 +9,18 @@ import {
   MIN_RELEVANCE_SIMILARITY,
   RETRIEVAL_LIMIT,
 } from "../modules/ai/ai.config.js";
-import { NO_RELEVANT_KNOWLEDGE_MESSAGE, PROVIDER_ERROR_MESSAGE } from "../modules/ai/prompts/fallback-messages.js";
+import {
+  CONTACT_RECEIVED_MESSAGE,
+  CUSTOMER_REQUESTED_HUMAN_MESSAGE,
+  NO_RELEVANT_KNOWLEDGE_MESSAGE,
+  PROVIDER_ERROR_MESSAGE,
+} from "../modules/ai/prompts/fallback-messages.js";
 import { insertConversationNote } from "../modules/conversations/conversation-note.repository.js";
+import {
+  updateEscalationContactSyncStatus,
+  upsertEscalationContact,
+  type EscalationContactMethod,
+} from "../modules/conversations/conversation-escalation-contact.repository.js";
 import {
   upsertConversationRating,
   type ConversationRatingValue,
@@ -24,17 +34,21 @@ import {
   saveConversationSummary,
   updateConversationStatus,
   type ConversationStatus,
+  type EscalationReason,
 } from "../modules/conversations/conversation.repository.js";
-import { insertMessage, listMessages } from "../modules/conversations/message.repository.js";
+import { insertMessage, listMessages, type MessageMetadata } from "../modules/conversations/message.repository.js";
 import { getCustomerById, insertCustomer } from "../modules/customers/customer.repository.js";
 import { insertIntegrationActionLog } from "../modules/integrations/integration-action-log.repository.js";
 import { lookupContact as lookupContactViaIntegration } from "../modules/integrations/integration.service.js";
 import type { ContactLookupResult, IntegrationProvider } from "../modules/integrations/integration-provider.js";
 import type { EmbeddingProvider } from "../modules/knowledge/embedding-provider.js";
 import { searchKnowledge } from "../modules/knowledge/knowledge.service.js";
+import { syncEscalationContact as syncEscalationContactToPlatform } from "../modules/ops/escalation-sync.service.js";
+import type { EscalationSyncProvider } from "../modules/ops/escalation-sync-provider.js";
 import { publishToConversation } from "../modules/realtime/conversation-hub.js";
 import { getUserById } from "../modules/users/user.repository.js";
 import { getWorkspaceById } from "../modules/workspaces/workspace.repository.js";
+import { isExplicitHumanRequest } from "./human-request-phrases.js";
 
 /**
  * This module IS the System Architecture's "Support Orchestrator" - the
@@ -74,6 +88,12 @@ export interface OrchestratorDeps {
   aiProvider?: AiProvider;
   embeddingProvider?: EmbeddingProvider;
   integrationProviderFactory?: (credentials: { accessToken: string }) => IntegrationProvider;
+  // A direct instance override, not a factory like integrationProviderFactory
+  // above - the platform escalation mirror is a singleton (one Airtable
+  // base for the whole platform, modules/ops/escalation-sync.service.ts),
+  // not constructed per-workspace from a workspace's own credentials, so
+  // there's no per-call construction step to inject a factory for.
+  escalationSyncProvider?: EscalationSyncProvider | null;
 }
 
 interface InitiateConversationParams {
@@ -183,6 +203,27 @@ async function generateAiReply(
   publishToConversation(conversationId, { type: "typing:start", payload: {} });
 
   try {
+    // Checked before retrieval, not after: a bare "talk to a human"
+    // message usually matches no knowledge chunks at all, so if this ran
+    // after the relevance-floor check below it would always lose to the
+    // no_relevant_knowledge path and the model would never even see it.
+    // Deterministic phrase matching, not a model call - see
+    // human-request-phrases.ts for why precision over recall matters
+    // here specifically.
+    if (isExplicitHumanRequest(customerMessage)) {
+      await withWorkspaceContext(workspaceId, (scopedDb) =>
+        escalateConversation(scopedDb, workspaceId, conversationId, {
+          reason: "customer_requested_human",
+          detail: "Customer explicitly asked to speak with a human.",
+        }),
+      );
+      await sendSystemMessage(workspaceId, conversationId, CUSTOMER_REQUESTED_HUMAN_MESSAGE, {
+        escalated: true,
+        escalationReason: "customer_requested_human",
+      });
+      return;
+    }
+
     const { workspaceName, history } = await withWorkspaceContext(workspaceId, async (scopedDb) => {
       const workspace = await getWorkspaceById(scopedDb, workspaceId);
       if (!workspace) {
@@ -207,7 +248,10 @@ async function generateAiReply(
           detail: "No knowledge chunks met the minimum relevance threshold for this question.",
         }),
       );
-      await sendSystemMessage(workspaceId, conversationId, NO_RELEVANT_KNOWLEDGE_MESSAGE);
+      await sendSystemMessage(workspaceId, conversationId, NO_RELEVANT_KNOWLEDGE_MESSAGE, {
+        escalated: true,
+        escalationReason: "no_relevant_knowledge",
+      });
       return;
     }
 
@@ -226,6 +270,21 @@ async function generateAiReply(
       deps.aiProvider,
     );
 
+    // Escalation reason is decided before persisting, not after, so the
+    // reply message itself can carry escalated/escalationReason in the
+    // same write the widget's live message:receive event delivers - the
+    // signal the widget uses to offer the contact form is attached to
+    // the exact message that triggered it, not a separate follow-up patch.
+    let escalation: { reason: EscalationReason; detail: string } | null = null;
+    if (result.needsEscalation || result.confidence < CONFIDENCE_ESCALATION_THRESHOLD) {
+      escalation = {
+        reason: result.needsEscalation ? "ai_requested_escalation" : "low_confidence",
+        detail: result.needsEscalation
+          ? `Model requested escalation (confidence ${result.confidence.toFixed(2)}).`
+          : `Confidence ${result.confidence.toFixed(2)} below threshold ${CONFIDENCE_ESCALATION_THRESHOLD}.`,
+      };
+    }
+
     const aiMessage = await withWorkspaceContext(workspaceId, (scopedDb) =>
       insertMessage(scopedDb, {
         workspaceId,
@@ -240,18 +299,14 @@ async function generateAiReply(
           citations: result.citations,
           usage: result.usage,
           finishReason: result.finishReason,
+          ...(escalation ? { escalated: true, escalationReason: escalation.reason } : {}),
         },
       }),
     );
 
-    if (result.needsEscalation || result.confidence < CONFIDENCE_ESCALATION_THRESHOLD) {
+    if (escalation) {
       await withWorkspaceContext(workspaceId, (scopedDb) =>
-        escalateConversation(scopedDb, workspaceId, conversationId, {
-          reason: result.needsEscalation ? "ai_requested_escalation" : "low_confidence",
-          detail: result.needsEscalation
-            ? `Model requested escalation (confidence ${result.confidence.toFixed(2)}).`
-            : `Confidence ${result.confidence.toFixed(2)} below threshold ${CONFIDENCE_ESCALATION_THRESHOLD}.`,
-        }),
+        escalateConversation(scopedDb, workspaceId, conversationId, escalation),
       );
     }
 
@@ -263,16 +318,24 @@ async function generateAiReply(
       escalateConversation(scopedDb, workspaceId, conversationId, { reason: "ai_provider_error", detail }),
     ).catch(() => {});
 
-    await sendSystemMessage(workspaceId, conversationId, PROVIDER_ERROR_MESSAGE).catch(() => {
+    await sendSystemMessage(workspaceId, conversationId, PROVIDER_ERROR_MESSAGE, {
+      escalated: true,
+      escalationReason: "ai_provider_error",
+    }).catch(() => {
       // Even the fallback failed to send - at least stop the indicator.
       publishToConversation(conversationId, { type: "typing:stop", payload: {} });
     });
   }
 }
 
-async function sendSystemMessage(workspaceId: string, conversationId: string, content: string): Promise<void> {
+async function sendSystemMessage(
+  workspaceId: string,
+  conversationId: string,
+  content: string,
+  metadata?: MessageMetadata,
+): Promise<void> {
   const message = await withWorkspaceContext(workspaceId, (scopedDb) =>
-    insertMessage(scopedDb, { workspaceId, conversationId, senderType: "system", content }),
+    insertMessage(scopedDb, { workspaceId, conversationId, senderType: "system", content, metadata }),
   );
   publishToConversation(conversationId, { type: "typing:stop", payload: {} });
   publishToConversation(conversationId, { type: "message:receive", payload: message });
@@ -576,4 +639,114 @@ export async function rateConversation(
     }
     await upsertConversationRating(scopedDb, { workspaceId, conversationId, rating });
   });
+}
+
+// --- Human Escalation Contact Capture ---
+
+interface ConversationEscalationMetadata {
+  escalation?: { reason: EscalationReason; detail: string; escalatedAt: string };
+}
+
+/**
+ * Customer-facing, widget-triggered - same shape as rateConversation
+ * above: the conversationId is client-supplied and looked up against
+ * this workspace before use, never trusted at face value.
+ *
+ * The escalation reason/detail are snapshotted from conversation.metadata
+ * once, here, and stored on the contact row itself - not re-read live at
+ * sync time. escalateConversation's jsonb merge overwrites
+ * conversation.metadata.escalation on every new escalation event, so a
+ * live read (at sync time, or worse, on a retry days later) could attach
+ * a later, unrelated escalation's reason to a contact captured in
+ * response to an earlier one.
+ *
+ * The sync into the platform's internal escalation mirror (modules/ops/)
+ * is fire-and-forget via JobRunner and never blocks this function's own
+ * return or the confirmation message - Postgres (conversation_escalation_
+ * contacts) is the authoritative record regardless of whether the
+ * platform's Airtable is configured or reachable. This is a platform-
+ * level sink, not a workspace integration - see ops/escalation-sync.
+ * service.ts for why an unconfigured platform is a silent no-op here,
+ * not an error, and CLAUDE.md's Integration Service note on why Airtable
+ * isn't in modules/integrations at all.
+ */
+export async function captureEscalationContact(
+  workspaceId: string,
+  conversationId: string,
+  contact: { name: string; contactMethod: EscalationContactMethod; contactValue: string },
+  deps: OrchestratorDeps = {},
+): Promise<void> {
+  const savedContact = await withWorkspaceContext(workspaceId, async (scopedDb) => {
+    const found = await getConversationById(scopedDb, workspaceId, conversationId);
+    if (!found) {
+      throw new NotFoundError("Conversation not found.");
+    }
+    const escalation = (found.metadata as ConversationEscalationMetadata).escalation;
+    return upsertEscalationContact(scopedDb, {
+      workspaceId,
+      conversationId,
+      ...contact,
+      escalationReason: escalation?.reason ?? "customer_requested_human",
+      escalationDetail: escalation?.detail ?? "",
+    });
+  });
+
+  await sendSystemMessage(workspaceId, conversationId, CONTACT_RECEIVED_MESSAGE);
+
+  // Routed through JobRunner, not a bare `void ...` - same reasoning as
+  // handleCustomerMessage's generateAiReply call: production
+  // (InProcessJobRunner) never blocks on this, SynchronousJobRunner makes
+  // it deterministically awaitable in tests. .catch swallows any
+  // unexpected failure here the same way generateAiReply's own call does
+  // - a broken Airtable sync must never surface as a failure of the
+  // customer-facing contact submission, which already succeeded above.
+  const jobRunner = deps.jobRunner ?? getDefaultJobRunner();
+  await jobRunner.run(() => syncEscalationContactToPlatformMirror(workspaceId, conversationId, savedContact, deps).catch(() => {}));
+}
+
+async function syncEscalationContactToPlatformMirror(
+  workspaceId: string,
+  conversationId: string,
+  contact: {
+    id: string;
+    name: string;
+    contactMethod: EscalationContactMethod;
+    contactValue: string;
+    escalationReason: string;
+    escalationDetail: string;
+    airtableRecordId: string | null;
+  },
+  deps: OrchestratorDeps,
+): Promise<void> {
+  const workspace = await withWorkspaceContext(workspaceId, (scopedDb) => getWorkspaceById(scopedDb, workspaceId));
+
+  const outcome = await syncEscalationContactToPlatform(
+    {
+      name: contact.name,
+      contactMethod: contact.contactMethod,
+      contactValue: contact.contactValue,
+      conversationId,
+      workspaceName: workspace?.name ?? "Unknown workspace",
+      escalationReason: contact.escalationReason,
+      escalationDetail: contact.escalationDetail,
+      existingRecordId: contact.airtableRecordId ?? undefined,
+    },
+    deps.escalationSyncProvider,
+  );
+
+  // outcome === null: the platform's own Airtable isn't configured
+  // (env.ts's AIRTABLE_* vars unset) - nothing to sync, nothing to mark
+  // failed. The row stays 'pending' rather than a misleading 'failed'.
+  if (!outcome) {
+    return;
+  }
+
+  await withWorkspaceContext(workspaceId, (scopedDb) =>
+    updateEscalationContactSyncStatus(
+      scopedDb,
+      contact.id,
+      outcome.result ? "synced" : "failed",
+      outcome.result?.recordId,
+    ),
+  );
 }

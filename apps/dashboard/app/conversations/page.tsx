@@ -10,13 +10,32 @@ interface ConversationSummary {
   status: string;
   assignedUserId: string | null;
   assignedUserName: string | null;
+  metadata: { escalation?: { reason: string; detail: string } };
   createdAt: string;
   updatedAt: string;
 }
 
-type FilterTab = "unassigned" | "mine" | "all";
+const ESCALATION_REASON_LABELS: Record<string, string> = {
+  no_relevant_knowledge: "No matching knowledge",
+  low_confidence: "Low AI confidence",
+  ai_requested_escalation: "AI requested a human",
+  ai_provider_error: "AI provider error",
+  customer_requested_human: "Customer asked for a human",
+};
+
+type FilterTab = "unassigned" | "mine" | "needs-follow-up" | "all";
 
 const POLL_INTERVAL_MS = 5000;
+
+// "Needs follow-up" = escalated and nobody's picked it up yet - no new
+// backend filter needed, GET /conversations already supports status and
+// assigned as independent, combinable query params.
+const TAB_QUERY: Record<FilterTab, string> = {
+  unassigned: "?assigned=unassigned",
+  mine: "?assigned=me",
+  "needs-follow-up": "?status=escalated&assigned=unassigned",
+  all: "",
+};
 
 export default function ConversationsPage() {
   const router = useRouter();
@@ -27,7 +46,7 @@ export default function ConversationsPage() {
     let cancelled = false;
 
     async function load() {
-      const query = tab === "unassigned" ? "?assigned=unassigned" : tab === "mine" ? "?assigned=me" : "";
+      const query = TAB_QUERY[tab];
       try {
         const data = await apiFetch<{ conversations: ConversationSummary[] }>(`/conversations${query}`);
         if (!cancelled) {
@@ -58,7 +77,7 @@ export default function ConversationsPage() {
       </div>
 
       <div className="mb-4 flex gap-2">
-        {(["unassigned", "mine", "all"] as const).map((option) => (
+        {(["unassigned", "mine", "needs-follow-up", "all"] as const).map((option) => (
           <button
             key={option}
             onClick={() => setTab(option)}
@@ -66,7 +85,13 @@ export default function ConversationsPage() {
               tab === option ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"
             }`}
           >
-            {option === "unassigned" ? "Unassigned" : option === "mine" ? "Mine" : "All"}
+            {option === "unassigned"
+              ? "Unassigned"
+              : option === "mine"
+                ? "Mine"
+                : option === "needs-follow-up"
+                  ? "Needs follow-up"
+                  : "All"}
           </button>
         ))}
       </div>
@@ -83,6 +108,12 @@ export default function ConversationsPage() {
               <div>
                 <span className="font-mono text-xs text-slate-500">{conversation.id.slice(0, 8)}</span>{" "}
                 <StatusBadge status={conversation.status} />
+                {conversation.metadata.escalation && (
+                  <span className="ml-2 text-xs text-amber-700">
+                    {ESCALATION_REASON_LABELS[conversation.metadata.escalation.reason] ??
+                      conversation.metadata.escalation.reason}
+                  </span>
+                )}
               </div>
               <div className="text-slate-500">
                 {conversation.assignedUserName ?? "Unassigned"} ·{" "}

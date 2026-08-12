@@ -29,6 +29,17 @@ const envSchema = z.object({
   // plaintext (the API calls the third-party provider with it), not just
   // verifiable, so it's a real encryption key, not a signing secret.
   INTEGRATION_CREDENTIALS_KEY: z.string().min(32),
+  // The platform's own internal escalation mirror (modules/ops/) - one
+  // Airtable base/table for the whole platform, not a per-workspace
+  // connection, so this is plain server config, not an encrypted
+  // per-workspace credential like INTEGRATION_CREDENTIALS_KEY protects.
+  // All three optional together: escalation capture works fully without
+  // them (Postgres stays authoritative), the sync is just a no-op until
+  // configured - same "fails gracefully but visibly" precedent
+  // VOYAGE_API_KEY already sets.
+  AIRTABLE_API_KEY: z.string().optional(),
+  AIRTABLE_BASE_ID: z.string().optional(),
+  AIRTABLE_TABLE_NAME: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

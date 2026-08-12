@@ -120,6 +120,13 @@
       "when": 1786465345147,
       "tag": "0016_grant_auth_resolver_signup_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1786534684570,
+      "tag": "0017_cuddly_quentin_quire",
+      "breakpoints": true
     }
   ]
 }

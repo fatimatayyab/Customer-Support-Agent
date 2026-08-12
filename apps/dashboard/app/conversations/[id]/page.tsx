@@ -12,7 +12,10 @@ interface ConversationDetail {
   status: string;
   assignedUserId: string | null;
   assignedUserName: string | null;
-  metadata: { aiSummary?: { text: string; generatedAt: string; provider: string; model: string } };
+  metadata: {
+    aiSummary?: { text: string; generatedAt: string; provider: string; model: string };
+    escalation?: { reason: string; detail: string; escalatedAt: string };
+  };
   createdAt: string;
   updatedAt: string;
 }
@@ -25,6 +28,21 @@ interface ConversationNote {
   createdAt: string;
 }
 
+interface EscalationContact {
+  id: string;
+  name: string;
+  contactMethod: "email" | "phone";
+  contactValue: string;
+}
+
+const ESCALATION_REASON_LABELS: Record<string, string> = {
+  no_relevant_knowledge: "No matching knowledge",
+  low_confidence: "Low AI confidence",
+  ai_requested_escalation: "AI requested a human",
+  ai_provider_error: "AI provider error",
+  customer_requested_human: "Customer asked for a human",
+};
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export default function ConversationDetailPage() {
@@ -36,6 +54,7 @@ export default function ConversationDetailPage() {
   const [conversation, setConversation] = useState<ConversationDetail | null>(null);
   const [messages, setMessages] = useState<WireMessage[]>([]);
   const [notes, setNotes] = useState<ConversationNote[]>([]);
+  const [escalationContact, setEscalationContact] = useState<EscalationContact | null>(null);
   const [connected, setConnected] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [typing, setTyping] = useState(false);
@@ -51,13 +70,17 @@ export default function ConversationDetailPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   async function loadDetail() {
-    const data = await apiFetch<{ conversation: ConversationDetail; messages: WireMessage[]; notes: ConversationNote[] }>(
-      `/conversations/${conversationId}`,
-    );
+    const data = await apiFetch<{
+      conversation: ConversationDetail;
+      messages: WireMessage[];
+      notes: ConversationNote[];
+      escalationContact: EscalationContact | null;
+    }>(`/conversations/${conversationId}`);
     if (data) {
       setConversation(data.conversation);
       setMessages(data.messages);
       setNotes(data.notes);
+      setEscalationContact(data.escalationContact);
     }
   }
 
@@ -261,6 +284,17 @@ export default function ConversationDetailPage() {
           </div>
         </div>
 
+        {conversation.metadata.escalation && (
+          <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm">
+            <div className="font-medium text-amber-800">
+              Escalated:{" "}
+              {ESCALATION_REASON_LABELS[conversation.metadata.escalation.reason] ??
+                conversation.metadata.escalation.reason}
+            </div>
+            <p className="mt-1 text-amber-700">{conversation.metadata.escalation.detail}</p>
+          </div>
+        )}
+
         <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
           {conversation.metadata.aiSummary ? (
             <p>{conversation.metadata.aiSummary.text}</p>
@@ -311,6 +345,18 @@ export default function ConversationDetailPage() {
       </div>
 
       <aside className="w-64 shrink-0">
+        {escalationContact && (
+          <div className="mb-4">
+            <h2 className="mb-2 text-sm font-semibold tracking-wide text-slate-500 uppercase">Follow-up contact</h2>
+            <div className="rounded-md border border-slate-200 p-2 text-sm">
+              <div className="font-medium">{escalationContact.name}</div>
+              <div className="text-slate-500">
+                {escalationContact.contactMethod === "email" ? "Email" : "Phone"}: {escalationContact.contactValue}
+              </div>
+            </div>
+          </div>
+        )}
+
         {hubspotConnected && (
           <div className="mb-4">
             <h2 className="mb-2 text-sm font-semibold tracking-wide text-slate-500 uppercase">CRM</h2>

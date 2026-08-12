@@ -236,3 +236,78 @@
   opacity: 0.5;
   cursor: default;
 }
+
+.escalation-offer {
+  align-self: flex-start;
+  max-width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #0f172a;
+  margin-top: 4px;
+}
+
+.escalation-offer-done {
+  color: #64748b;
+  border-style: dashed;
+}
+
+.escalation-offer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.escalation-offer-actions button {
+  all: unset;
+  cursor: pointer;
+  background: #0f172a;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.escalation-offer-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.escalation-offer-dismiss {
+  background: transparent !important;
+  color: #64748b !important;
+}
+
+.escalation-offer-form input,
+.escalation-offer-form select {
+  all: unset;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+  font-size: 12px;
+}
+
+.escalation-offer-contact-row {
+  display: flex;
+  gap: 6px;
+}
+
+.escalation-offer-contact-row select {
+  flex: 0 0 auto;
+}
+
+.escalation-offer-contact-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.escalation-offer-error {
+  color: #dc2626;
+  font-size: 12px;
+}

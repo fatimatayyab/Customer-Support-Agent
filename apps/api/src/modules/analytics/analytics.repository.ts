@@ -110,7 +110,7 @@ export interface AiMessageStats {
 }
 
 // Only 'ai' messages ever populate `metadata` with this shape (see
-// message.repository.ts's AiMessageMetadata) - every extraction here
+// message.repository.ts's MessageMetadata) - every extraction here
 // reads a jsonb path, not a real column, since there's no dedicated
 // analytics table (this milestone is read-only over existing data).
 export async function getAiMessageStats(scopedDb: ScopedDb, workspaceId: string, since: Date): Promise<AiMessageStats> {

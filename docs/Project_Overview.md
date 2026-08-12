@@ -36,6 +36,8 @@ Then, if nobody's currently handling this conversation, here's the fun part: the
 
 The moment a support agent claims that conversation from the dashboard, the AI just... stops. No flag to flip, no process to cancel — the code simply never asks it to reply for that conversation again once a human owns it. The agent can reply directly, leave private notes only the team can see, ask the AI for a quick suggested reply or a conversation summary to save time, and — if the business has connected something like HubSpot — pull up the customer's real CRM record without leaving the console.
 
+A customer can also ask for a human directly ("can I talk to someone"), not just wait for the AI to decide it's stuck — either way, they're offered a quick "leave your name and contact info" form right in the chat, entirely optional. It's saved and visible right on the conversation, with who still needs to be followed up with easy to find in the dashboard queue. It also quietly mirrors into an internal Airtable we (the platform team) watch across every business on the platform — that's our own tool for catching a struggling customer early during this design-partner phase, not something any business configures or even sees; nothing about a business's own follow-up depends on it.
+
 Every single one of these businesses is completely walled off from every other one. That's not just an app-level check — it's enforced two different ways at once (application logic *and* the database itself refuses to return another business's rows), because with a multi-tenant product, "a customer's data leaked to a different customer" is the one mistake that's genuinely unacceptable.
 
 ## What's actually built and working today
@@ -45,7 +47,8 @@ Quite a lot, honestly:
 - **The whole core loop** — sign up, embed the widget, chat live with a real AI reply grounded in real uploaded knowledge, or escalate to a human. This has been true for a while now and it works end-to-end.
 - **The knowledge base** — you can paste text, upload a PDF or a Word doc, or just paste in a handful of URLs and we'll pull the content and index it, all automatically chunked and embedded and searchable.
 - **The agent console** — a real queue of conversations, claiming, reassigning, internal notes, AI-assisted suggested replies and summaries.
-- **A first outside integration** — HubSpot. An agent working a conversation can pull up that customer's actual CRM contact.
+- **One outside integration a business connects themselves** — HubSpot, where an agent working a conversation can pull up that customer's actual CRM contact.
+- **Human escalation, either direction** — a customer can explicitly ask for a human mid-chat, not just get escalated by the AI's own judgment call. Either way, they're offered an optional contact form so a team member can follow up even if nobody's watching the live chat right then. That contact also mirrors into our own internal Airtable (platform-wide, not per-business) so we can keep an eye on escalations across every workspace during this design-partner phase — invisible to the business itself, purely our own operational tool.
 - **Team management** — invite teammates by email with a shareable link, assign them a role (owner, admin, support agent), and they're in. (Right now it's copy-link only — no actual email gets sent yet — but the whole thing is built so that plugging in a real email provider later is a tiny change, not a rebuild.)
 - **An automated test suite** — not exhaustive, but it covers the part that actually matters most: every tenant-isolation boundary (a generic, schema-driven check that fails loudly if a new table ever ships without it) and the Support Orchestrator's business logic, running against a real Postgres database, not mocks.
 - **Rate limiting** on the endpoints that either cost real money per request (AI replies, knowledge-base embedding) or are realistic abuse targets (login, signup, invitations) — backed by Redis, which had been sitting provisioned-but-unused since day one.
@@ -55,7 +58,7 @@ Quite a lot, honestly:
 ## What's in progress or still missing
 
 - **No real email sending** for invitations yet — just the copy-link. The interface is built for it; no provider is plugged in.
-- **Only one outside integration** (HubSpot, one action — pulling up a contact). The design supports adding more easily, but nothing else is wired up yet, and it's deliberately waiting for a second real use case before generalizing the interface further.
+- **Only one outside integration a business connects themselves** (HubSpot, one action — pulling up a contact). The design supports adding more easily, but nothing else is wired up yet, and it's deliberately waiting for a second real use case before generalizing the interface further.
 - **No billing or subscription management** — the last item from the original MVP scope that hasn't been touched at all. No schema, no payment provider, nothing. That's a real vendor decision (almost certainly Stripe) someone needs to make before it's worth building.
 - **No additional chat channels** (WhatsApp, email, etc.) — the website widget is the only one today.
 - **Analytics is read-only and reactive, not yet prescriptive** — it tells you what happened, but there's no "here's what you should do about it" layer (e.g. "your knowledge base is missing an answer for X") yet. That needs a product decision about what a useful recommendation even looks like before it's worth building.

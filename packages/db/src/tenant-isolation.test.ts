@@ -180,6 +180,22 @@ const fixtures: Record<string, FixtureBuilder> = {
     return must(rating, "conversation_ratings fixture: INSERT ... RETURNING produced no row.");
   },
 
+  conversation_escalation_contacts: async (scopedDb, workspaceId) => {
+    const conversation = await insertMinimalConversation(scopedDb, workspaceId);
+    const [contact] = await scopedDb
+      .insert(schema.conversationEscalationContacts)
+      .values({
+        workspaceId,
+        conversationId: conversation.id,
+        name: "Fixture Customer",
+        contactMethod: "email",
+        contactValue: "fixture@example.test",
+        escalationReason: "customer_requested_human",
+      })
+      .returning();
+    return must(contact, "conversation_escalation_contacts fixture: INSERT ... RETURNING produced no row.");
+  },
+
   invitations: async (scopedDb, workspaceId) => {
     const user = await insertMinimalUser(scopedDb, workspaceId);
     const [invitation] = await scopedDb

@@ -104,7 +104,8 @@ export type EscalationReason =
   | "no_relevant_knowledge"
   | "low_confidence"
   | "ai_requested_escalation"
-  | "ai_provider_error";
+  | "ai_provider_error"
+  | "customer_requested_human";
 
 export async function escalateConversation(
   scopedDb: ScopedDb,

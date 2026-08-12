@@ -1,12 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { conversationRatings, integrationActionLogs, withWorkspaceContext } from "@csa/db";
+import { conversationEscalationContacts, conversationRatings, integrationActionLogs, withWorkspaceContext } from "@csa/db";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NotFoundError } from "../errors.js";
-import { getConversationById } from "../modules/conversations/conversation.repository.js";
+import { escalateConversation, getConversationById } from "../modules/conversations/conversation.repository.js";
+import { getEscalationContactByConversationId } from "../modules/conversations/conversation-escalation-contact.repository.js";
 import { listConversationNotes } from "../modules/conversations/conversation-note.repository.js";
 import { listMessages } from "../modules/conversations/message.repository.js";
-import { PROVIDER_ERROR_MESSAGE } from "../modules/ai/prompts/fallback-messages.js";
+import {
+  CONTACT_RECEIVED_MESSAGE,
+  CUSTOMER_REQUESTED_HUMAN_MESSAGE,
+  PROVIDER_ERROR_MESSAGE,
+} from "../modules/ai/prompts/fallback-messages.js";
 import { encryptCredentials } from "../modules/integrations/credential-crypto.js";
 import { upsertIntegration } from "../modules/integrations/integration.repository.js";
 import { insertKnowledgeChunks } from "../modules/knowledge/knowledge-chunk.repository.js";
@@ -14,11 +19,13 @@ import { insertKnowledgeSource } from "../modules/knowledge/knowledge-source.rep
 import { SynchronousJobRunner } from "../job-runner.js";
 import { FakeAiProvider } from "../test-support/fake-ai-provider.js";
 import { FakeEmbeddingProvider } from "../test-support/fake-embedding-provider.js";
+import { FakeEscalationSyncProvider } from "../test-support/fake-escalation-sync-provider.js";
 import { FakeIntegrationProvider, fakeIntegrationProviderFactory } from "../test-support/fake-integration-provider.js";
 import { createConversation, createCustomer, createUser, createWorkspace } from "../test-support/fixtures.js";
 import { resetDatabase } from "../test-support/reset-database.js";
 import {
   addInternalNote,
+  captureEscalationContact,
   changeConversationStatus,
   claimConversation,
   handleCustomerMessage,
@@ -267,6 +274,84 @@ describe("handleCustomerMessage", () => {
       listMessages(scopedDb, workspace.id, conversation.id),
     );
     expect(messageContents(messages)).toContainEqual({ senderType: "system", content: PROVIDER_ERROR_MESSAGE });
+  });
+
+  it("escalates as customer_requested_human and never calls the AI when the customer explicitly asks for one", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    // Deliberately unconfigured FakeAiProvider/FakeEmbeddingProvider -
+    // if isExplicitHumanRequest's fast path doesn't actually short-circuit
+    // before retrieval/generation, either fake throws and this test fails.
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "Can I talk to a human please?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider: new FakeAiProvider(), embeddingProvider: new FakeEmbeddingProvider() },
+    );
+
+    const conversationAfter = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      getConversationById(scopedDb, workspace.id, conversation.id),
+    );
+    const metadata = conversationAfter?.metadata as { escalation?: { reason: string } } | null;
+    expect(conversationAfter?.status).toBe("escalated");
+    expect(metadata?.escalation?.reason).toBe("customer_requested_human");
+
+    const messages = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      listMessages(scopedDb, workspace.id, conversation.id),
+    );
+    expect(messages.some((message) => message.senderType === "ai")).toBe(false);
+    expect(messageContents(messages)).toContainEqual({
+      senderType: "system",
+      content: CUSTOMER_REQUESTED_HUMAN_MESSAGE,
+    });
+    const humanRequestMessage = messages.find((message) => message.content === CUSTOMER_REQUESTED_HUMAN_MESSAGE);
+    expect((humanRequestMessage?.metadata as { escalated?: boolean } | null)?.escalated).toBe(true);
+  });
+
+  it("does not treat a generic mention of 'agent' or 'person' as a request for a human", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const embeddingProvider = new FakeEmbeddingProvider();
+    await seedRelevantKnowledge(workspace.id, embeddingProvider);
+    const aiProvider = new FakeAiProvider().mockReply({ reply: "Our travel agent can help with that.", confidence: 0.9 });
+
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "Does your travel agent handle refunds for a person like me?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider, embeddingProvider },
+    );
+
+    const conversationAfter = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      getConversationById(scopedDb, workspace.id, conversation.id),
+    );
+    const metadata = conversationAfter?.metadata as { escalation?: { reason: string } } | null;
+    expect(metadata?.escalation?.reason).not.toBe("customer_requested_human");
+    const messages = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      listMessages(scopedDb, workspace.id, conversation.id),
+    );
+    expect(messageContents(messages)).toContainEqual({
+      senderType: "ai",
+      content: "Our travel agent can help with that.",
+    });
+  });
+
+  it("stamps escalated/escalationReason onto the ai message's own metadata, not just the conversation", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const embeddingProvider = new FakeEmbeddingProvider();
+    await seedRelevantKnowledge(workspace.id, embeddingProvider);
+    const aiProvider = new FakeAiProvider().mockReply({ reply: "Not sure about that.", confidence: 0.1 });
+
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "Can I get a refund?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider, embeddingProvider },
+    );
+
+    const messages = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      listMessages(scopedDb, workspace.id, conversation.id),
+    );
+    const aiMessage = messages.find((message) => message.senderType === "ai");
+    const metadata = aiMessage?.metadata as { escalated?: boolean; escalationReason?: string } | null;
+    expect(metadata?.escalated).toBe(true);
+    expect(metadata?.escalationReason).toBe("low_confidence");
   });
 });
 
@@ -527,6 +612,189 @@ describe("lookupContact", () => {
       scopedDb.select().from(integrationActionLogs).where(eq(integrationActionLogs.workspaceId, workspace.id)),
     );
     expect(logs).toHaveLength(0);
+  });
+});
+
+describe("captureEscalationContact", () => {
+  // getEscalationContactByConversationId is column-limited to what the
+  // dashboard is allowed to see (name/contactMethod/contactValue only -
+  // the platform's internal escalationReason/airtableSyncStatus/
+  // airtableRecordId are deliberately never exposed to a workspace, see
+  // that function's own comment). Tests verify the platform-internal
+  // fields via a direct table query instead, same pattern the
+  // lookupContact tests below already use for integration_action_logs.
+  async function getFullEscalationContact(workspaceId: string, conversationId: string) {
+    const [contact] = await withWorkspaceContext(workspaceId, (scopedDb) =>
+      scopedDb.select().from(conversationEscalationContacts).where(eq(conversationEscalationContacts.conversationId, conversationId)),
+    );
+    return contact ?? null;
+  }
+
+  it("saves the contact and sends a confirmation message even with no platform Airtable configured", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    await captureEscalationContact(
+      workspace.id,
+      conversation.id,
+      { name: "Jane Doe", contactMethod: "email", contactValue: "jane@example.test" },
+      { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: null },
+    );
+
+    const contact = await getFullEscalationContact(workspace.id, conversation.id);
+    expect(contact?.name).toBe("Jane Doe");
+    // Stays 'pending', not 'failed' - an unconfigured platform mirror is
+    // a legitimate no-op, not a sync failure (escalation-sync.service.ts's
+    // syncEscalationContact returns null in this case).
+    expect(contact?.airtableSyncStatus).toBe("pending");
+
+    const messages = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      listMessages(scopedDb, workspace.id, conversation.id),
+    );
+    expect(messageContents(messages)).toContainEqual({ senderType: "system", content: CONTACT_RECEIVED_MESSAGE });
+
+    // Never surfaced to the dashboard - column-limited select excludes it.
+    const dashboardView = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      getEscalationContactByConversationId(scopedDb, workspace.id, conversation.id),
+    );
+    expect(dashboardView).not.toHaveProperty("airtableSyncStatus");
+  });
+
+  it("marks the contact synced after a successful sync to the platform mirror", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const fakeProvider = new FakeEscalationSyncProvider().mockSynced();
+
+    await captureEscalationContact(
+      workspace.id,
+      conversation.id,
+      { name: "Jane Doe", contactMethod: "phone", contactValue: "+1-555-0100" },
+      { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: fakeProvider },
+    );
+
+    const contact = await getFullEscalationContact(workspace.id, conversation.id);
+    expect(contact?.airtableSyncStatus).toBe("synced");
+  });
+
+  it("marks the contact failed, but still keeps the confirmation message, when the sync errors", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const fakeProvider = new FakeEscalationSyncProvider().mockError(new Error("Airtable is down"));
+
+    await captureEscalationContact(
+      workspace.id,
+      conversation.id,
+      { name: "Jane Doe", contactMethod: "email", contactValue: "jane@example.test" },
+      { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: fakeProvider },
+    );
+
+    const contact = await getFullEscalationContact(workspace.id, conversation.id);
+    expect(contact?.airtableSyncStatus).toBe("failed");
+
+    const messages = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      listMessages(scopedDb, workspace.id, conversation.id),
+    );
+    expect(messageContents(messages)).toContainEqual({ senderType: "system", content: CONTACT_RECEIVED_MESSAGE });
+  });
+
+  it("upserts rather than duplicating when the same conversation submits again", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    await captureEscalationContact(
+      workspace.id,
+      conversation.id,
+      { name: "Jane Doe", contactMethod: "email", contactValue: "typo@example.test" },
+      { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: null },
+    );
+    await captureEscalationContact(
+      workspace.id,
+      conversation.id,
+      { name: "Jane Doe", contactMethod: "email", contactValue: "jane@example.test" },
+      { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: null },
+    );
+
+    const contact = await getFullEscalationContact(workspace.id, conversation.id);
+    expect(contact?.contactValue).toBe("jane@example.test");
+  });
+
+  it("updates the existing record on resubmission instead of creating a duplicate", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const fakeProvider = new FakeEscalationSyncProvider().mockSynced({ recordId: "airtable-rec-1" });
+    const deps = { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: fakeProvider };
+
+    await captureEscalationContact(
+      workspace.id,
+      conversation.id,
+      { name: "Jane Doe", contactMethod: "email", contactValue: "typo@example.test" },
+      deps,
+    );
+    await captureEscalationContact(
+      workspace.id,
+      conversation.id,
+      { name: "Jane Doe", contactMethod: "email", contactValue: "jane@example.test" },
+      deps,
+    );
+
+    expect(fakeProvider.calls).toHaveLength(2);
+    expect(fakeProvider.calls[0]?.existingRecordId).toBeUndefined();
+    expect(fakeProvider.calls[1]?.existingRecordId).toBe("airtable-rec-1");
+
+    const contact = await getFullEscalationContact(workspace.id, conversation.id);
+    expect(contact?.airtableRecordId).toBe("airtable-rec-1");
+  });
+
+  it("snapshots the escalation reason at capture time, not whatever the conversation says later", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "anything?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider: new FakeAiProvider(), embeddingProvider: new FakeEmbeddingProvider() },
+    );
+
+    await captureEscalationContact(
+      workspace.id,
+      conversation.id,
+      { name: "Jane Doe", contactMethod: "email", contactValue: "jane@example.test" },
+      { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: null },
+    );
+
+    // A second, unrelated escalation happens on the same conversation
+    // AFTER the contact was captured - escalateConversation's jsonb merge
+    // overwrites conversations.metadata.escalation with this new reason.
+    // The already-captured contact must still remember the original one.
+    await withWorkspaceContext(workspace.id, (scopedDb) =>
+      escalateConversation(scopedDb, workspace.id, conversation.id, {
+        reason: "ai_requested_escalation",
+        detail: "A later, unrelated escalation.",
+      }),
+    );
+    const conversationAfter = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      getConversationById(scopedDb, workspace.id, conversation.id),
+    );
+    expect((conversationAfter?.metadata as { escalation?: { reason: string } })?.escalation?.reason).toBe(
+      "ai_requested_escalation",
+    );
+
+    const contact = await getFullEscalationContact(workspace.id, conversation.id);
+    expect(contact?.escalationReason).toBe("no_relevant_knowledge");
+  });
+
+  it("can't reach a conversation belonging to a different workspace", async () => {
+    const workspaceA = await createWorkspace();
+    const workspaceB = await createWorkspace();
+    const conversationA = await createConversation(workspaceA.id);
+
+    await expect(
+      captureEscalationContact(
+        workspaceB.id,
+        conversationA.id,
+        { name: "Jane Doe", contactMethod: "email", contactValue: "jane@example.test" },
+        { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: null },
+      ),
+    ).rejects.toThrow(NotFoundError);
   });
 });
 

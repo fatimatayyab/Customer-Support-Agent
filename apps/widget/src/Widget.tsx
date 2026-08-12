@@ -3,7 +3,13 @@ import { identifyWorkspace, type IdentifiedWorkspace } from "./api.js";
 import { ChatPanel } from "./ChatPanel.js";
 import type { WidgetConfig } from "./config.js";
 import { getStoredConversationId, getStoredCustomerId, storeConversation } from "./storage.js";
-import { ChatConnection, type ConversationRatingValue, type IncomingEvent, type WireMessage } from "./ws-client.js";
+import {
+  ChatConnection,
+  type ConversationRatingValue,
+  type EscalationContactMethod,
+  type IncomingEvent,
+  type WireMessage,
+} from "./ws-client.js";
 
 type IdentifyStatus =
   | { state: "loading" }
@@ -19,6 +25,7 @@ export function Widget({ config }: { config: WidgetConfig }) {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [typing, setTyping] = useState(false);
   const [rating, setRating] = useState<ConversationRatingValue | null>(null);
+  const [contactSubmitted, setContactSubmitted] = useState(false);
   const connectionRef = useRef<ChatConnection | null>(null);
 
   useEffect(() => {
@@ -52,6 +59,12 @@ export function Widget({ config }: { config: WidgetConfig }) {
           // was already given. Harmless: rateConversation upserts, so
           // rating again just re-confirms the same value.
           setRating(null);
+          // Not restored from any prior submission either, same
+          // deliberate v1 simplification as rating above - a resumed
+          // conversation with an already-submitted contact just offers
+          // the form again if a later escalation happens; resubmitting
+          // is harmless since the server upserts.
+          setContactSubmitted(false);
           break;
         case "message:receive":
           setMessages((previous) => [...previous, event.payload]);
@@ -115,6 +128,15 @@ export function Widget({ config }: { config: WidgetConfig }) {
     );
   }
 
+  function handleSubmitContact(contact: { name: string; contactMethod: EscalationContactMethod; contactValue: string }) {
+    if (!conversationId) {
+      return Promise.reject(new Error("No active conversation."));
+    }
+    return connectionRef.current!.submitEscalationContact(conversationId, contact).then(() => {
+      setContactSubmitted(true);
+    });
+  }
+
   if (identify.state !== "ready") {
     return (
       <div class="bubble">
@@ -142,6 +164,8 @@ export function Widget({ config }: { config: WidgetConfig }) {
       canRate={conversationId !== null}
       rating={rating}
       onRate={handleRate}
+      contactSubmitted={contactSubmitted}
+      onSubmitContact={handleSubmitContact}
       onSend={handleSend}
       onTyping={handleTyping}
       onClose={() => setOpen(false)}

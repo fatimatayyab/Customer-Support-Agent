@@ -3,7 +3,7 @@ import { conversationRatings, conversations, messages, withWorkspaceContext } fr
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { escalateConversation, updateConversationStatus } from "../conversations/conversation.repository.js";
-import { insertMessage, type AiMessageMetadata } from "../conversations/message.repository.js";
+import { insertMessage, type MessageMetadata } from "../conversations/message.repository.js";
 import { insertKnowledgeSource } from "../knowledge/knowledge-source.repository.js";
 import { rateConversation } from "../../orchestrator/support-orchestrator.js";
 import { createConversation, createWorkspace } from "../../test-support/fixtures.js";
@@ -12,9 +12,9 @@ import { getAnalyticsOverview } from "./analytics.service.js";
 
 // A thin builder over the real insertMessage repository function, same
 // spirit as test-support/fixtures.ts - not exported there because this
-// shape (an 'ai' message with a full AiMessageMetadata payload) is only
+// shape (an 'ai' message with a full MessageMetadata payload) is only
 // ever needed by analytics tests.
-async function insertAiMessage(workspaceId: string, conversationId: string, overrides: Partial<AiMessageMetadata> = {}) {
+async function insertAiMessage(workspaceId: string, conversationId: string, overrides: Partial<MessageMetadata> = {}) {
   return withWorkspaceContext(workspaceId, (scopedDb) =>
     insertMessage(scopedDb, {
       workspaceId,

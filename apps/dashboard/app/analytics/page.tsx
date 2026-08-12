@@ -83,6 +83,7 @@ const ESCALATION_REASON_LABELS: Record<string, string> = {
   low_confidence: "Low confidence",
   ai_requested_escalation: "AI requested escalation",
   ai_provider_error: "AI provider error",
+  customer_requested_human: "Customer asked for a human",
 };
 
 const CSAT_LABELS: Record<string, string> = {

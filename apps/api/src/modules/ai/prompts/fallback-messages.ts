@@ -9,3 +9,8 @@ export const NO_RELEVANT_KNOWLEDGE_MESSAGE =
 
 export const PROVIDER_ERROR_MESSAGE =
   "Thanks for your patience - I'm having trouble generating a response right now. I've flagged this conversation for a team member to follow up.";
+
+export const CUSTOMER_REQUESTED_HUMAN_MESSAGE =
+  "Of course - I've flagged this conversation for a team member to follow up with you directly.";
+
+export const CONTACT_RECEIVED_MESSAGE = "Thanks - a team member will reach out to you soon.";

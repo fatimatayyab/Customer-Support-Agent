@@ -9,6 +9,7 @@ import { redisClient } from "./redis-client.js";
 import { RateLimitExceededError } from "./rate-limit.js";
 import { analyticsRoutes } from "./modules/analytics/analytics.routes.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
+import { conversationEscalationContactRoutes } from "./modules/conversations/conversation-escalation-contact.routes.js";
 import { conversationRatingRoutes } from "./modules/conversations/conversation-rating.routes.js";
 import { conversationRoutes } from "./modules/conversations/conversation.routes.js";
 import { integrationRoutes } from "./modules/integrations/integration.routes.js";
@@ -93,6 +94,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.register(knowledgeRoutes);
   app.register(conversationRoutes);
   app.register(conversationRatingRoutes);
+  app.register(conversationEscalationContactRoutes);
   app.register(agentConsoleRealtimeRoutes);
   app.register(integrationRoutes);
   app.register(userRoutes);

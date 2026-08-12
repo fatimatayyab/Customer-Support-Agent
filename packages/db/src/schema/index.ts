@@ -6,6 +6,7 @@ export * from "./conversations.js";
 export * from "./messages.js";
 export * from "./conversation-notes.js";
 export * from "./conversation-ratings.js";
+export * from "./conversation-escalation-contacts.js";
 export * from "./knowledge-sources.js";
 export * from "./knowledge-chunks.js";
 export * from "./vector-type.js";

@@ -2,11 +2,15 @@ import { sql } from "drizzle-orm";
 import { index, jsonb, pgEnum, pgPolicy, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { workspaces } from "./workspaces.js";
 
-// One value today (hubspot) - declared as an enum rather than free text
-// because "which vendor" is a closed, known set at any point in time,
-// same reasoning as knowledge_sources' source-type enum. Unlike that
-// enum, there's no approved upfront list to declare ahead of support for -
-// add a value here only when a provider actually gets implemented.
+// Declared as an enum rather than free text because "which vendor" is a
+// closed, known set at any point in time, same reasoning as
+// knowledge_sources' source-type enum. Unlike that enum, there's no
+// approved upfront list to declare ahead of support for - add a value
+// here only when a provider actually gets implemented. Airtable
+// deliberately does NOT belong here - it's a single, platform-level
+// escalation mirror (apps/api/src/modules/ops/), not a workspace's own
+// external-system connection, so it has no per-workspace `integrations`
+// row at all. See modules/ops/escalation-sync.service.ts.
 export const integrationProviderEnum = pgEnum("integration_provider", ["hubspot"]);
 
 export const integrationStatusEnum = pgEnum("integration_status", ["connected", "error", "disconnected"]);
