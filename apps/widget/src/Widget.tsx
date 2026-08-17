@@ -59,12 +59,12 @@ export function Widget({ config }: { config: WidgetConfig }) {
           // was already given. Harmless: rateConversation upserts, so
           // rating again just re-confirms the same value.
           setRating(null);
-          // Not restored from any prior submission either, same
-          // deliberate v1 simplification as rating above - a resumed
-          // conversation with an already-submitted contact just offers
-          // the form again if a later escalation happens; resubmitting
-          // is harmless since the server upserts.
-          setContactSubmitted(false);
+          // Seeded from the server, unlike rating above - the backend
+          // already knows whether this conversation has a captured
+          // contact (conversation_escalation_contacts), so a reload/new
+          // tab/reconnect correctly keeps the offer suppressed instead
+          // of asking again just because this component remounted.
+          setContactSubmitted(event.payload.hasEscalationContact);
           break;
         case "message:receive":
           setMessages((previous) => [...previous, event.payload]);

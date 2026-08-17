@@ -13,6 +13,7 @@ import {
 } from "../../orchestrator/support-orchestrator.js";
 import { requireSession } from "../auth/require-session.js";
 import { getEscalationContactByConversationId } from "./conversation-escalation-contact.repository.js";
+import { listConversationEscalations } from "./conversation-escalation.repository.js";
 import { listConversationNotes } from "./conversation-note.repository.js";
 import { getConversationDetail, listConversations, type ConversationStatus } from "./conversation.repository.js";
 import { listMessages } from "./message.repository.js";
@@ -71,12 +72,13 @@ export async function conversationRoutes(app: FastifyInstance) {
       if (!conversation) {
         return null;
       }
-      const [conversationMessages, notes, escalationContact] = await Promise.all([
+      const [conversationMessages, notes, escalationContact, escalations] = await Promise.all([
         listMessages(scopedDb, request.workspaceId!, request.params.id),
         listConversationNotes(scopedDb, request.workspaceId!, request.params.id),
         getEscalationContactByConversationId(scopedDb, request.workspaceId!, request.params.id),
+        listConversationEscalations(scopedDb, request.workspaceId!, request.params.id),
       ]);
-      return { conversation, messages: conversationMessages, notes, escalationContact };
+      return { conversation, messages: conversationMessages, notes, escalationContact, escalations };
     });
 
     if (!result) {

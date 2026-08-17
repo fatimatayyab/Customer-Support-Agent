@@ -196,6 +196,20 @@ const fixtures: Record<string, FixtureBuilder> = {
     return must(contact, "conversation_escalation_contacts fixture: INSERT ... RETURNING produced no row.");
   },
 
+  conversation_escalations: async (scopedDb, workspaceId) => {
+    const conversation = await insertMinimalConversation(scopedDb, workspaceId);
+    const [escalation] = await scopedDb
+      .insert(schema.conversationEscalations)
+      .values({
+        workspaceId,
+        conversationId: conversation.id,
+        reason: "customer_requested_human",
+        escalatedAt: new Date(),
+      })
+      .returning();
+    return must(escalation, "conversation_escalations fixture: INSERT ... RETURNING produced no row.");
+  },
+
   invitations: async (scopedDb, workspaceId) => {
     const user = await insertMinimalUser(scopedDb, workspaceId);
     const [invitation] = await scopedDb

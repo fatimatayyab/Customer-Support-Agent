@@ -17,10 +17,12 @@ import {
 } from "../modules/ai/prompts/fallback-messages.js";
 import { insertConversationNote } from "../modules/conversations/conversation-note.repository.js";
 import {
+  getFullEscalationContactByConversationId,
   updateEscalationContactSyncStatus,
   upsertEscalationContact,
   type EscalationContactMethod,
 } from "../modules/conversations/conversation-escalation-contact.repository.js";
+import { listConversationEscalations } from "../modules/conversations/conversation-escalation.repository.js";
 import {
   upsertConversationRating,
   type ConversationRatingValue,
@@ -115,7 +117,18 @@ export async function initiateConversation(params: InitiateConversationParams) {
           throw new NotFoundError("initiateConversation: conversation.customerId has no matching row.");
         }
         const history = await listMessages(scopedDb, params.workspaceId, conversation.id);
-        return { customer, conversation, messages: history };
+        // Tells the widget whether to offer the escalation-contact form
+        // again on this resumed conversation - it must not, if the
+        // customer already gave contact details earlier (even in a
+        // different browser tab/session, since the widget's own
+        // "already asked" state is otherwise just in-memory and resets
+        // on every reload/reconnect).
+        const existingContact = await getFullEscalationContactByConversationId(
+          scopedDb,
+          params.workspaceId,
+          conversation.id,
+        );
+        return { customer, conversation, messages: history, hasEscalationContact: existingContact !== null };
       }
       // Stale or invalid conversationId (e.g. from an old localStorage
       // value) - fall through and start fresh below.
@@ -131,7 +144,7 @@ export async function initiateConversation(params: InitiateConversationParams) {
       customerId: customer.id,
     });
 
-    return { customer, conversation, messages: [] };
+    return { customer, conversation, messages: [], hasEscalationContact: false };
   });
 }
 
@@ -211,11 +224,11 @@ async function generateAiReply(
     // human-request-phrases.ts for why precision over recall matters
     // here specifically.
     if (isExplicitHumanRequest(customerMessage)) {
-      await withWorkspaceContext(workspaceId, (scopedDb) =>
-        escalateConversation(scopedDb, workspaceId, conversationId, {
-          reason: "customer_requested_human",
-          detail: "Customer explicitly asked to speak with a human.",
-        }),
+      await recordEscalation(
+        workspaceId,
+        conversationId,
+        { reason: "customer_requested_human", detail: "Customer explicitly asked to speak with a human." },
+        deps,
       );
       await sendSystemMessage(workspaceId, conversationId, CUSTOMER_REQUESTED_HUMAN_MESSAGE, {
         escalated: true,
@@ -242,11 +255,14 @@ async function generateAiReply(
     ).filter((chunk) => chunk.similarity >= MIN_RELEVANCE_SIMILARITY);
 
     if (relevantChunks.length === 0) {
-      await withWorkspaceContext(workspaceId, (scopedDb) =>
-        escalateConversation(scopedDb, workspaceId, conversationId, {
+      await recordEscalation(
+        workspaceId,
+        conversationId,
+        {
           reason: "no_relevant_knowledge",
           detail: "No knowledge chunks met the minimum relevance threshold for this question.",
-        }),
+        },
+        deps,
       );
       await sendSystemMessage(workspaceId, conversationId, NO_RELEVANT_KNOWLEDGE_MESSAGE, {
         escalated: true,
@@ -305,18 +321,14 @@ async function generateAiReply(
     );
 
     if (escalation) {
-      await withWorkspaceContext(workspaceId, (scopedDb) =>
-        escalateConversation(scopedDb, workspaceId, conversationId, escalation),
-      );
+      await recordEscalation(workspaceId, conversationId, escalation, deps);
     }
 
     publishToConversation(conversationId, { type: "typing:stop", payload: {} });
     publishToConversation(conversationId, { type: "message:receive", payload: aiMessage });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown AI provider error.";
-    await withWorkspaceContext(workspaceId, (scopedDb) =>
-      escalateConversation(scopedDb, workspaceId, conversationId, { reason: "ai_provider_error", detail }),
-    ).catch(() => {});
+    await recordEscalation(workspaceId, conversationId, { reason: "ai_provider_error", detail }, deps).catch(() => {});
 
     await sendSystemMessage(workspaceId, conversationId, PROVIDER_ERROR_MESSAGE, {
       escalated: true,
@@ -648,6 +660,47 @@ interface ConversationEscalationMetadata {
 }
 
 /**
+ * The single funnel every escalation path (generateAiReply's four call
+ * sites) now goes through, instead of calling escalateConversation
+ * directly - escalateConversation itself only ever touches Postgres
+ * (conversations.metadata + the new conversation_escalations history
+ * row). Keeping a customer's contact submission current in the
+ * platform's escalation mirror once they've already given one is a
+ * separate, network-reaching concern that belongs at the Orchestrator
+ * layer, not the repository.
+ *
+ * captureEscalationContact (below) is what fires the *first* sync, when
+ * a contact is submitted. This is what keeps that same Airtable record
+ * current on every *later* escalation on the same conversation - without
+ * it, a conversation that escalates again after its one contact
+ * submission would silently go stale in the mirror, since nothing else
+ * would ever re-trigger a sync (the widget deliberately doesn't re-ask
+ * for contact details once already given - see captureEscalationContact).
+ */
+async function recordEscalation(
+  workspaceId: string,
+  conversationId: string,
+  escalation: { reason: EscalationReason; detail: string },
+  deps: OrchestratorDeps,
+): Promise<void> {
+  await withWorkspaceContext(workspaceId, (scopedDb) =>
+    escalateConversation(scopedDb, workspaceId, conversationId, escalation),
+  );
+
+  const existingContact = await withWorkspaceContext(workspaceId, (scopedDb) =>
+    getFullEscalationContactByConversationId(scopedDb, workspaceId, conversationId),
+  );
+  if (!existingContact) {
+    return;
+  }
+
+  const jobRunner = deps.jobRunner ?? getDefaultJobRunner();
+  await jobRunner.run(() =>
+    syncEscalationContactToPlatformMirror(workspaceId, conversationId, existingContact, deps).catch(() => {}),
+  );
+}
+
+/**
  * Customer-facing, widget-triggered - same shape as rateConversation
  * above: the conversationId is client-supplied and looked up against
  * this workspace before use, never trusted at face value.
@@ -704,6 +757,23 @@ export async function captureEscalationContact(
   await jobRunner.run(() => syncEscalationContactToPlatformMirror(workspaceId, conversationId, savedContact, deps).catch(() => {}));
 }
 
+// Turns the full, ordered escalation history into the two fields the
+// platform mirror actually gets: a compact list of every distinct
+// reason this conversation has escalated for (first-occurrence order,
+// not deduplicated-away - "all of them," per the whole point of keeping
+// a history instead of a single overwritten field), and a numbered,
+// timestamped narrative for the long-text detail field. Pure formatting,
+// no I/O, so it's trivial to unit-test independent of the sync call.
+function summarizeEscalationHistory(
+  events: { reason: string; detail: string; escalatedAt: Date }[],
+): { reasonSummary: string; detailSummary: string } {
+  const uniqueReasons = [...new Set(events.map((event) => event.reason))];
+  const detailSummary = events
+    .map((event, index) => `${index + 1}. [${event.reason}] ${event.escalatedAt.toISOString()} - ${event.detail}`)
+    .join("\n");
+  return { reasonSummary: uniqueReasons.join(", "), detailSummary };
+}
+
 async function syncEscalationContactToPlatformMirror(
   workspaceId: string,
   conversationId: string,
@@ -712,13 +782,17 @@ async function syncEscalationContactToPlatformMirror(
     name: string;
     contactMethod: EscalationContactMethod;
     contactValue: string;
-    escalationReason: string;
-    escalationDetail: string;
     airtableRecordId: string | null;
   },
   deps: OrchestratorDeps,
 ): Promise<void> {
-  const workspace = await withWorkspaceContext(workspaceId, (scopedDb) => getWorkspaceById(scopedDb, workspaceId));
+  const { workspace, history } = await withWorkspaceContext(workspaceId, async (scopedDb) => {
+    const workspace = await getWorkspaceById(scopedDb, workspaceId);
+    const history = await listConversationEscalations(scopedDb, workspaceId, conversationId);
+    return { workspace, history };
+  });
+
+  const { reasonSummary, detailSummary } = summarizeEscalationHistory(history);
 
   const outcome = await syncEscalationContactToPlatform(
     {
@@ -727,8 +801,8 @@ async function syncEscalationContactToPlatformMirror(
       contactValue: contact.contactValue,
       conversationId,
       workspaceName: workspace?.name ?? "Unknown workspace",
-      escalationReason: contact.escalationReason,
-      escalationDetail: contact.escalationDetail,
+      escalationReason: reasonSummary,
+      escalationDetail: detailSummary,
       existingRecordId: contact.airtableRecordId ?? undefined,
     },
     deps.escalationSyncProvider,

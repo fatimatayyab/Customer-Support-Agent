@@ -29,7 +29,20 @@ export interface WireCustomer {
 export type ConversationRatingValue = "up" | "down";
 
 export type IncomingEvent =
-  | { type: "conversation:initiated"; payload: { customer: WireCustomer; conversation: WireConversation; messages: WireMessage[] } }
+  | {
+      type: "conversation:initiated";
+      payload: {
+        customer: WireCustomer;
+        conversation: WireConversation;
+        messages: WireMessage[];
+        // Whether this conversation already has a captured escalation
+        // contact - lets the widget skip offering the form again on a
+        // resumed conversation (a reload, a new tab, a reconnect) where
+        // the customer already gave their details, instead of always
+        // starting from "not submitted" on every fresh connect.
+        hasEscalationContact: boolean;
+      };
+    }
   | { type: "message:receive"; payload: WireMessage }
   | { type: "typing:start"; payload: Record<string, never> }
   | { type: "typing:stop"; payload: Record<string, never> }

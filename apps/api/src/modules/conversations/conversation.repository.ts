@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { conversations, users, type ScopedDb } from "@csa/db";
 import { assertDefined } from "../../assert.js";
+import { insertConversationEscalation } from "./conversation-escalation.repository.js";
 
 export type ConversationStatus = (typeof conversations.$inferSelect)["status"];
 
@@ -107,17 +108,28 @@ export type EscalationReason =
   | "ai_provider_error"
   | "customer_requested_human";
 
+// Writes to two places on every call, not just one: conversations.metadata
+// stays a cheap "current reason" snapshot (existing readers - the queue
+// badge, analytics.repository.ts's breakdown - only ever want "what's
+// this conversation escalated for right now"), while
+// conversation_escalations gets a new, permanent row - a conversation
+// that escalates more than once, for different reasons, over its
+// lifetime must not lose the earlier ones just because a later one
+// happened. Both writes happen inside the same scopedDb call, so they
+// share whatever transaction the caller is already in.
 export async function escalateConversation(
   scopedDb: ScopedDb,
   workspaceId: string,
   conversationId: string,
   escalation: { reason: EscalationReason; detail: string },
 ): Promise<void> {
+  const escalatedAt = new Date();
+
   // `detail` can contain an arbitrary caught-error message (quotes,
   // backslashes, anything) - bind it as a normal parameter and cast,
   // never hand-build the JSON into a raw SQL string.
   const escalationPayload = JSON.stringify({
-    escalation: { ...escalation, escalatedAt: new Date().toISOString() },
+    escalation: { ...escalation, escalatedAt: escalatedAt.toISOString() },
   });
 
   // Merge into existing metadata (jsonb ||) rather than overwrite the
@@ -130,6 +142,14 @@ export async function escalateConversation(
       updatedAt: new Date(),
     })
     .where(and(eq(conversations.id, conversationId), eq(conversations.workspaceId, workspaceId)));
+
+  await insertConversationEscalation(scopedDb, {
+    workspaceId,
+    conversationId,
+    reason: escalation.reason,
+    detail: escalation.detail,
+    escalatedAt,
+  });
 }
 
 export async function saveConversationSummary(

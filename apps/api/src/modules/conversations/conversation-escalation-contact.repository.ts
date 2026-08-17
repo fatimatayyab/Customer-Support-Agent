@@ -69,6 +69,28 @@ export async function getEscalationContactByConversationId(
   return contact ?? null;
 }
 
+// Full-row, unrestricted - internal Orchestrator use only (checking
+// "does a contact already exist for this conversation" before offering
+// the widget's contact form again, and before firing a resync), never
+// exposed through a route. Distinct from getEscalationContactByConversationId
+// above, which is deliberately column-limited for the dashboard response.
+export async function getFullEscalationContactByConversationId(
+  scopedDb: ScopedDb,
+  workspaceId: string,
+  conversationId: string,
+) {
+  const [contact] = await scopedDb
+    .select()
+    .from(conversationEscalationContacts)
+    .where(
+      and(
+        eq(conversationEscalationContacts.workspaceId, workspaceId),
+        eq(conversationEscalationContacts.conversationId, conversationId),
+      ),
+    );
+  return contact ?? null;
+}
+
 // airtableRecordId is only ever passed on a successful sync (undefined
 // on failure) - a failed attempt must never overwrite a previously
 // recorded id with undefined, since that id is what makes the next

@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { conversationEscalationContacts, conversationRatings, integrationActionLogs, withWorkspaceContext } from "@csa/db";
+import {
+  conversationEscalationContacts,
+  conversationEscalations,
+  conversationRatings,
+  integrationActionLogs,
+  withWorkspaceContext,
+} from "@csa/db";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NotFoundError } from "../errors.js";
@@ -120,6 +126,38 @@ describe("initiateConversation", () => {
     });
 
     expect(result.customer.id).toBe(realCustomer.id);
+  });
+
+  it("reports hasEscalationContact: false for a conversation with no captured contact yet", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    const result = await initiateConversation({ workspaceId: workspace.id, conversationId: conversation.id });
+
+    expect(result.hasEscalationContact).toBe(false);
+  });
+
+  it("reports hasEscalationContact: false for a brand-new conversation", async () => {
+    const workspace = await createWorkspace();
+
+    const result = await initiateConversation({ workspaceId: workspace.id });
+
+    expect(result.hasEscalationContact).toBe(false);
+  });
+
+  it("reports hasEscalationContact: true once a contact has been captured for this conversation - the widget's signal not to re-offer the form on a resumed session", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    await captureEscalationContact(
+      workspace.id,
+      conversation.id,
+      { name: "Jane Doe", contactMethod: "email", contactValue: "jane@example.test" },
+      { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: null },
+    );
+
+    const result = await initiateConversation({ workspaceId: workspace.id, conversationId: conversation.id });
+
+    expect(result.hasEscalationContact).toBe(true);
   });
 });
 
@@ -352,6 +390,43 @@ describe("handleCustomerMessage", () => {
     const metadata = aiMessage?.metadata as { escalated?: boolean; escalationReason?: string } | null;
     expect(metadata?.escalated).toBe(true);
     expect(metadata?.escalationReason).toBe("low_confidence");
+  });
+
+  it("preserves every escalation reason across multiple escalations on the same conversation, not just the latest", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    // First escalation: no knowledge base at all -> no_relevant_knowledge.
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "anything?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider: new FakeAiProvider(), embeddingProvider: new FakeEmbeddingProvider() },
+    );
+    // Second, separate escalation on the very same conversation.
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "can I talk to a human?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider: new FakeAiProvider(), embeddingProvider: new FakeEmbeddingProvider() },
+    );
+
+    // conversations.metadata.escalation stays a "current reason only"
+    // snapshot, unchanged behavior - existing readers (queue badge,
+    // analytics) still just want the latest.
+    const conversationAfter = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      getConversationById(scopedDb, workspace.id, conversation.id),
+    );
+    const metadata = conversationAfter?.metadata as { escalation?: { reason: string } } | null;
+    expect(metadata?.escalation?.reason).toBe("customer_requested_human");
+
+    // But the full history table remembers both, in order - this is the
+    // part that didn't exist before and is what a human reviewing the
+    // conversation actually needs to see.
+    const history = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      scopedDb
+        .select()
+        .from(conversationEscalations)
+        .where(eq(conversationEscalations.conversationId, conversation.id)),
+    );
+    expect(history).toHaveLength(2);
+    expect(history.map((event) => event.reason).sort()).toEqual(["customer_requested_human", "no_relevant_knowledge"].sort());
   });
 });
 
@@ -795,6 +870,64 @@ describe("captureEscalationContact", () => {
         { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: null },
       ),
     ).rejects.toThrow(NotFoundError);
+  });
+
+  it("does not attempt a sync for an escalation on a conversation with no captured contact", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    // Deliberately unconfigured - records every call before it would
+    // throw, so this still proves zero calls happened rather than
+    // silently passing if recordEscalation's resync fired unexpectedly.
+    const fakeProvider = new FakeEscalationSyncProvider();
+
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "anything?" },
+      {
+        jobRunner: new SynchronousJobRunner(),
+        aiProvider: new FakeAiProvider(),
+        embeddingProvider: new FakeEmbeddingProvider(),
+        escalationSyncProvider: fakeProvider,
+      },
+    );
+
+    expect(fakeProvider.calls).toHaveLength(0);
+  });
+
+  it("re-syncs the platform mirror on a later escalation once a contact already exists, without asking the customer again", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    // First escalation, then a contact is captured for it.
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "anything?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider: new FakeAiProvider(), embeddingProvider: new FakeEmbeddingProvider() },
+    );
+    const fakeProvider = new FakeEscalationSyncProvider().mockSynced({ recordId: "airtable-rec-1" });
+    await captureEscalationContact(
+      workspace.id,
+      conversation.id,
+      { name: "Jane Doe", contactMethod: "email", contactValue: "jane@example.test" },
+      { jobRunner: new SynchronousJobRunner(), escalationSyncProvider: fakeProvider },
+    );
+    expect(fakeProvider.calls).toHaveLength(1);
+
+    // A second, later escalation on the same conversation - the widget
+    // never re-offers the contact form (the customer already gave one),
+    // but the platform mirror still needs to learn about this new reason.
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "can I talk to a human?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider: new FakeAiProvider(), embeddingProvider: new FakeEmbeddingProvider(), escalationSyncProvider: fakeProvider },
+    );
+
+    expect(fakeProvider.calls).toHaveLength(2);
+    // Updates the same record - never a second, duplicate one.
+    expect(fakeProvider.calls[1]?.existingRecordId).toBe("airtable-rec-1");
+    // Both reasons show up in the resynced payload, not just the newest.
+    expect(fakeProvider.calls[1]?.escalationReason).toContain("no_relevant_knowledge");
+    expect(fakeProvider.calls[1]?.escalationReason).toContain("customer_requested_human");
+
+    const contact = await getFullEscalationContact(workspace.id, conversation.id);
+    expect(contact?.airtableSyncStatus).toBe("synced");
   });
 });
 

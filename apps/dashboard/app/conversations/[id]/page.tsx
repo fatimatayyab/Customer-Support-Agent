@@ -12,9 +12,13 @@ interface ConversationDetail {
   status: string;
   assignedUserId: string | null;
   assignedUserName: string | null;
+  // metadata.escalation (the single "current reason" snapshot) is no
+  // longer read here - the full escalation history (below) replaced it,
+  // see conversation_escalations. Still written by escalateConversation
+  // for other readers (the queue badge, analytics) that only need "what
+  // is this conversation escalated for right now."
   metadata: {
     aiSummary?: { text: string; generatedAt: string; provider: string; model: string };
-    escalation?: { reason: string; detail: string; escalatedAt: string };
   };
   createdAt: string;
   updatedAt: string;
@@ -33,6 +37,13 @@ interface EscalationContact {
   name: string;
   contactMethod: "email" | "phone";
   contactValue: string;
+}
+
+interface EscalationEvent {
+  id: string;
+  reason: string;
+  detail: string;
+  escalatedAt: string;
 }
 
 const ESCALATION_REASON_LABELS: Record<string, string> = {
@@ -55,6 +66,7 @@ export default function ConversationDetailPage() {
   const [messages, setMessages] = useState<WireMessage[]>([]);
   const [notes, setNotes] = useState<ConversationNote[]>([]);
   const [escalationContact, setEscalationContact] = useState<EscalationContact | null>(null);
+  const [escalations, setEscalations] = useState<EscalationEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [typing, setTyping] = useState(false);
@@ -75,12 +87,14 @@ export default function ConversationDetailPage() {
       messages: WireMessage[];
       notes: ConversationNote[];
       escalationContact: EscalationContact | null;
+      escalations: EscalationEvent[];
     }>(`/conversations/${conversationId}`);
     if (data) {
       setConversation(data.conversation);
       setMessages(data.messages);
       setNotes(data.notes);
       setEscalationContact(data.escalationContact);
+      setEscalations(data.escalations);
     }
   }
 
@@ -284,14 +298,25 @@ export default function ConversationDetailPage() {
           </div>
         </div>
 
-        {conversation.metadata.escalation && (
+        {escalations.length > 0 && (
           <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm">
-            <div className="font-medium text-amber-800">
-              Escalated:{" "}
-              {ESCALATION_REASON_LABELS[conversation.metadata.escalation.reason] ??
-                conversation.metadata.escalation.reason}
+            <div className="mb-2 font-medium text-amber-800">
+              Escalated {escalations.length > 1 ? `${escalations.length} times` : "once"} - every reason, oldest first
+              (a human may need to address more than just the latest):
             </div>
-            <p className="mt-1 text-amber-700">{conversation.metadata.escalation.detail}</p>
+            <ul className="space-y-2">
+              {escalations.map((escalation) => (
+                <li key={escalation.id} className="border-l-2 border-amber-300 pl-2">
+                  <div className="font-medium text-amber-800">
+                    {ESCALATION_REASON_LABELS[escalation.reason] ?? escalation.reason}{" "}
+                    <span className="font-normal text-amber-600">
+                      {new Date(escalation.escalatedAt).toLocaleString()}
+                    </span>
+                  </div>
+                  {escalation.detail && <p className="text-amber-700">{escalation.detail}</p>}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
