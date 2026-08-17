@@ -197,7 +197,7 @@ Assume before starting any skill: Docker is up (`pnpm docker:up`), `pnpm -r run 
    - UI → real browser, console + network tab clean.
 5. Two-workspace cross-check (Skill 1) for any workspace-scoped table or new endpoint.
 6. Confirm migration generated/inspected/applied if schema changed.
-7. Remove any test data created during verification.
+7. Remove any test data created during verification — **explicitly include `workspace_signup_invites`** if the test provisioned a disposable workspace via a signup link. That table has no `workspace_id` column (by design - it exists to gate workspace creation *before* a workspace exists), so it is never touched by "delete the workspace and its cascaded rows." Deleting the workspace alone leaves the consumed invite row orphaned forever. Confirmed by direct query: two rows from prior verification passes (`platform-verify@example.test`, `escalation-history-verify@example.test`) survived exactly this way and sat unnoticed for days before being caught and cleaned up separately.
 8. Re-read the diff once, specifically for security/tenant-isolation/race issues, before calling it done.
 
 **Reference:** `CLAUDE.md` §17, §19
