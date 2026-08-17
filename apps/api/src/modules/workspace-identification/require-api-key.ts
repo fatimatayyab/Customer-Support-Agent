@@ -25,5 +25,14 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
     return;
   }
 
+  // A suspended workspace (Platform Owner Dashboard's Suspend action)
+  // must stop widget traffic, not just dashboard logins - otherwise a
+  // suspended client's embedded widget keeps calling paid AI endpoints
+  // indefinitely, defeating the whole point of suspending them.
+  if (apiKey.workspaceStatus !== "active") {
+    reply.code(401).send({ error: "Invalid API key." });
+    return;
+  }
+
   request.workspaceId = apiKey.workspaceId;
 }

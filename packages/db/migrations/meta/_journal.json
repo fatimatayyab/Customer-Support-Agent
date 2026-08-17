@@ -134,6 +134,27 @@
       "when": 1786937807633,
       "tag": "0018_blue_hairball",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786946217543,
+      "tag": "0019_curved_mister_fear",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786946287881,
+      "tag": "0020_grant_platform_operator",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786946863863,
+      "tag": "0021_grant_platform_operator_insert_defaults",
+      "breakpoints": true
     }
   ]
 }

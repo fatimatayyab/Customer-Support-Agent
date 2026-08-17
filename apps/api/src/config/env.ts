@@ -11,6 +11,11 @@ const envSchema = z.object({
   API_HOST: z.string().default("0.0.0.0"),
   DASHBOARD_ORIGIN: z.string().url(),
   SESSION_JWT_SECRET: z.string().min(32),
+  // Separate from SESSION_JWT_SECRET - a platform-admin session and a
+  // workspace session are structurally different identities (see
+  // modules/platform-auth/), and sharing a secret would mean a leak of
+  // one implies the other's blast radius.
+  PLATFORM_SESSION_JWT_SECRET: z.string().min(32),
   REDIS_URL: z.string().url(),
   // Optional so the API can boot without it - ingestion/search requests
   // fail with a clear "not configured" error until it's set, rather

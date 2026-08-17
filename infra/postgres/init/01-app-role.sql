@@ -29,3 +29,16 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO a
 CREATE ROLE auth_resolver WITH LOGIN PASSWORD 'auth_resolver_dev_password' NOSUPERUSER BYPASSRLS NOCREATEDB NOCREATEROLE;
 GRANT CONNECT ON DATABASE csa_dev TO auth_resolver;
 GRANT USAGE ON SCHEMA public TO auth_resolver;
+
+-- platform_operator is a second, deliberately separate BYPASSRLS role
+-- for the Platform Owner Dashboard - not an extension of auth_resolver.
+-- auth_resolver exists for one-shot, pre-tenant-context lookups (an API
+-- key or slug resolved before a request has a workspace to scope a query
+-- with); platform_operator is for an already-authenticated platform
+-- admin's ongoing, repeated, cross-tenant reads/writes (list/suspend any
+-- workspace, provision a new one). Its grants (see the migrations)
+-- are just as narrow, but keeping the two roles separate keeps each
+-- one's audit story - who can reach it, and why - clean.
+CREATE ROLE platform_operator WITH LOGIN PASSWORD 'platform_operator_dev_password' NOSUPERUSER BYPASSRLS NOCREATEDB NOCREATEROLE;
+GRANT CONNECT ON DATABASE csa_dev TO platform_operator;
+GRANT USAGE ON SCHEMA public TO platform_operator;

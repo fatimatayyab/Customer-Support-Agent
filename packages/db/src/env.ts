@@ -10,6 +10,7 @@ const envSchema = z.object({
   MIGRATIONS_DATABASE_URL: z.string().url(),
   DATABASE_URL: z.string().url(),
   AUTH_RESOLVER_DATABASE_URL: z.string().url(),
+  PLATFORM_OPERATOR_DATABASE_URL: z.string().url(),
 });
 
 export const dbEnv = envSchema.parse(process.env);

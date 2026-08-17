@@ -20,17 +20,26 @@ const authResolverDb = drizzle(authResolverPool, {
 
 export async function findApiKeyByHash(keyHash: string) {
   // Column list matches the migration's grant exactly (id, workspace_id,
-  // key_hash, revoked_at) - auth_resolver has no SELECT privilege on the
-  // rest of the table (name, key_prefix, last_used_at, created_at), so a
-  // bare select() here would fail with a Postgres permission error.
+  // key_hash, revoked_at on workspace_api_keys; status also already
+  // granted on workspaces for the login-by-slug path) - auth_resolver has
+  // no SELECT privilege on any other column, so a bare select() here
+  // would fail with a Postgres permission error.
+  //
+  // Joins workspaces.status so requireApiKey can reject a suspended
+  // workspace's widget traffic, not just its dashboard logins - without
+  // this, Suspend (the Platform Owner Dashboard's core action) would stop
+  // a client from logging in while their embedded widget kept running
+  // and incurring AI cost indefinitely.
   const [row] = await authResolverDb
     .select({
       id: workspaceApiKeys.id,
       workspaceId: workspaceApiKeys.workspaceId,
       keyHash: workspaceApiKeys.keyHash,
       revokedAt: workspaceApiKeys.revokedAt,
+      workspaceStatus: workspaces.status,
     })
     .from(workspaceApiKeys)
+    .innerJoin(workspaces, eq(workspaces.id, workspaceApiKeys.workspaceId))
     .where(eq(workspaceApiKeys.keyHash, keyHash))
     .limit(1);
 

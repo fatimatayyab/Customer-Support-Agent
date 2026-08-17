@@ -12,6 +12,7 @@
   "scripts": {
     "bootstrap": "node scripts/setup.mjs",
     "invite": "pnpm --filter @csa/db invite",
+    "platform-admin:create": "pnpm --filter @csa/db platform-admin:create",
     "dev": "pnpm -r --parallel --if-present run dev",
     "dev:api": "pnpm --filter @csa/api dev",
     "dev:dashboard": "pnpm --filter @csa/dashboard dev",

@@ -20,6 +20,8 @@ import { invitationRoutes } from "./modules/users/invitation.routes.js";
 import { userRoutes } from "./modules/users/user.routes.js";
 import { identifyRoutes } from "./modules/workspace-identification/identify.routes.js";
 import { workspaceRoutes } from "./modules/workspaces/workspace.routes.js";
+import { platformAuthRoutes } from "./modules/platform-auth/platform-auth.routes.js";
+import { platformRoutes } from "./modules/platform/platform.routes.js";
 
 const WIDGET_ROUTE_PREFIX = "/widget";
 
@@ -100,6 +102,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.register(userRoutes);
   app.register(invitationRoutes);
   app.register(analyticsRoutes);
+  app.register(platformAuthRoutes);
+  app.register(platformRoutes);
 
   app.setErrorHandler(errorHandler);
 
