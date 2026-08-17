@@ -4,11 +4,18 @@ import { withWorkspaceContext } from "@csa/db";
 import type { WorkspaceRole } from "@csa/shared";
 import { requireRole } from "../auth/require-role.js";
 import { requireSession } from "../auth/require-session.js";
-import { generateApiKey } from "../workspace-identification/api-key.js";
+import { generateApiKey, normalizeOrigin } from "../workspace-identification/api-key.js";
 import { insertApiKey, listActiveApiKeys, revokeApiKey } from "./api-key.repository.js";
+
+const MAX_ALLOWED_ORIGINS = 10;
 
 const createApiKeySchema = z.object({
   name: z.string().min(1).max(100),
+  // Optional - omitted or empty means unrestricted, the pre-existing
+  // behavior. Accepts either a bare hostname ("example.com") or a full
+  // origin ("https://example.com"); normalizeOrigin() reduces either to
+  // the same hostname-only shape requireApiKey compares against.
+  allowedOrigins: z.array(z.string().min(1).max(253)).max(MAX_ALLOWED_ORIGINS).optional(),
 });
 
 const MANAGE_API_KEY_ROLES: WorkspaceRole[] = ["owner", "administrator"];
@@ -23,12 +30,30 @@ export async function workspaceRoutes(app: FastifyInstance) {
     const body = createApiKeySchema.parse(request.body);
     const { rawKey, keyPrefix, keyHash } = generateApiKey();
 
+    // Malformed entries are dropped rather than rejected outright -
+    // normalizeOrigin returning null for one bad entry in a list of
+    // several shouldn't fail the whole request. An empty result after
+    // filtering (or no field at all) means unrestricted, same as before
+    // this column existed.
+    const normalizedOrigins = body.allowedOrigins
+      ?.map(normalizeOrigin)
+      .filter((origin): origin is string => origin !== null);
+    const allowedOrigins = normalizedOrigins && normalizedOrigins.length > 0 ? normalizedOrigins : null;
+
     const apiKey = await withWorkspaceContext(request.workspaceId!, (scopedDb) =>
-      insertApiKey(scopedDb, { workspaceId: request.workspaceId!, name: body.name, keyPrefix, keyHash }),
+      insertApiKey(scopedDb, { workspaceId: request.workspaceId!, name: body.name, keyPrefix, keyHash, allowedOrigins }),
     );
 
     // rawKey is only ever available in this response - only its hash is stored.
-    reply.code(201).send({ apiKey: { id: apiKey.id, name: apiKey.name, keyPrefix: apiKey.keyPrefix, rawKey } });
+    reply.code(201).send({
+      apiKey: {
+        id: apiKey.id,
+        name: apiKey.name,
+        keyPrefix: apiKey.keyPrefix,
+        allowedOrigins: apiKey.allowedOrigins,
+        rawKey,
+      },
+    });
   });
 
   app.get("/workspaces/api-keys", async (request, reply) => {

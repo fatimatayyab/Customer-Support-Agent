@@ -4,7 +4,13 @@ import { assertDefined } from "../../assert.js";
 
 export async function insertApiKey(
   scopedDb: ScopedDb,
-  params: { workspaceId: string; name: string; keyPrefix: string; keyHash: string },
+  params: {
+    workspaceId: string;
+    name: string;
+    keyPrefix: string;
+    keyHash: string;
+    allowedOrigins: string[] | null;
+  },
 ) {
   const [apiKey] = await scopedDb.insert(workspaceApiKeys).values(params).returning();
   return assertDefined(apiKey, "insertApiKey: INSERT ... RETURNING produced no row.");
@@ -16,6 +22,7 @@ export async function listActiveApiKeys(scopedDb: ScopedDb, workspaceId: string)
       id: workspaceApiKeys.id,
       name: workspaceApiKeys.name,
       keyPrefix: workspaceApiKeys.keyPrefix,
+      allowedOrigins: workspaceApiKeys.allowedOrigins,
       lastUsedAt: workspaceApiKeys.lastUsedAt,
       createdAt: workspaceApiKeys.createdAt,
     })

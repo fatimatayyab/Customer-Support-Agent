@@ -176,6 +176,20 @@
       "when": 1786959249082,
       "tag": "0024_grant_auth_resolver_api_key_last_used",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786965450871,
+      "tag": "0025_left_alex_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786965472518,
+      "tag": "0026_grant_auth_resolver_allowed_origins",
+      "breakpoints": true
     }
   ]
 }

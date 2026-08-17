@@ -1,0 +1,1 @@
+ALTER TABLE "workspace_api_keys" ADD COLUMN "allowed_origins" text[];

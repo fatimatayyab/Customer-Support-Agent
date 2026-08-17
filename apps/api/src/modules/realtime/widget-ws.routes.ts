@@ -2,11 +2,21 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { WebSocket } from "ws";
 import { z } from "zod";
 import { handleCustomerMessage, initiateConversation } from "../../orchestrator/support-orchestrator.js";
-import { checkRateLimit, RateLimitExceededError } from "../../rate-limit.js";
+import { checkRateLimit, rateLimitByWorkspace, RateLimitExceededError } from "../../rate-limit.js";
 import { redisClient } from "../../redis-client.js";
 import { requireApiKey } from "../workspace-identification/require-api-key.js";
 import { publishToConversation, subscribe, unsubscribe } from "./conversation-hub.js";
 import { issueWidgetWsTicket, verifyWidgetWsTicket } from "./widget-ws-ticket.js";
+
+// Workspace-keyed, not IP-keyed - the risk here is aggregate volume
+// against one workspace's key (every ticket issued can lead to a new
+// conversation, each of which can trigger a real AI call), not a single
+// visitor's request rate. Generous on purpose: a genuinely busy client's
+// site can have many concurrent visitors opening the widget within the
+// same minute, and this exists to catch a runaway/malicious script
+// hammering the endpoint, not to throttle normal traffic spikes - raise
+// it if a real client ever legitimately hits it.
+const WIDGET_SESSION_RATE_LIMIT = rateLimitByWorkspace(redisClient, "widget-session", 120, 60);
 
 // The actual AI-cost trigger point in this whole codebase: every
 // message:send that reaches an unassigned conversation fires a real
@@ -46,7 +56,7 @@ export async function widgetRealtimeRoutes(app: FastifyInstance) {
   // Step 1 of the WS handshake workaround: exchange the widget's API
   // key for a short-lived ticket over plain REST, where the X-API-Key
   // header still works normally.
-  app.post("/widget/session", { preHandler: requireApiKey }, async (request, reply) => {
+  app.post("/widget/session", { preHandler: [requireApiKey, WIDGET_SESSION_RATE_LIMIT] }, async (request, reply) => {
     const ticket = await issueWidgetWsTicket(request.workspaceId!);
     reply.send({ ticket });
   });

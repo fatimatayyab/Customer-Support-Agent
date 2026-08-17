@@ -36,6 +36,7 @@ export async function findApiKeyByHash(keyHash: string) {
       workspaceId: workspaceApiKeys.workspaceId,
       keyHash: workspaceApiKeys.keyHash,
       revokedAt: workspaceApiKeys.revokedAt,
+      allowedOrigins: workspaceApiKeys.allowedOrigins,
       workspaceStatus: workspaces.status,
     })
     .from(workspaceApiKeys)

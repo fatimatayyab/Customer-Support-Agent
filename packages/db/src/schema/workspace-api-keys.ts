@@ -24,6 +24,18 @@ export const workspaceApiKeys = pgTable(
     name: text("name").notNull(),
     keyPrefix: text("key_prefix").notNull(),
     keyHash: text("key_hash").notNull(),
+    // Null/empty = unrestricted (the default, and the only behavior that
+    // existed before this column). When set, requireApiKey rejects any
+    // request whose Origin header's hostname isn't in this list - the
+    // actual production-grade complement to treating this key as a
+    // public, embeddable identifier rather than a confidential secret
+    // (see the architecture review: revocability alone doesn't stop a
+    // scraped key being replayed from an unintended site; this does).
+    // Stored as bare hostnames only (no scheme/port/path) - normalized at
+    // creation time by workspace-identification/api-key.ts's
+    // normalizeOrigin(), the same function requireApiKey uses to
+    // normalize the incoming Origin header before comparing.
+    allowedOrigins: text("allowed_origins").array(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

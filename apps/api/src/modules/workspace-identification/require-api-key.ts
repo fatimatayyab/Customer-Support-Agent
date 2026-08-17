@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { findApiKeyByHash, touchApiKeyLastUsed } from "@csa/db";
-import { hashApiKey } from "./api-key.js";
+import { hashApiKey, normalizeOrigin } from "./api-key.js";
 
 /**
  * Workspace Identification for the widget channel: resolves the
@@ -32,6 +32,23 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
   if (apiKey.workspaceStatus !== "active") {
     reply.code(401).send({ error: "Invalid API key." });
     return;
+  }
+
+  // Null/empty allowedOrigins = unrestricted, the default and the only
+  // behavior that existed before this column - existing keys keep
+  // working exactly as they do today. When an owner has opted into
+  // restricting a key, a request with no Origin header (or one that
+  // doesn't parse) fails closed rather than being treated as
+  // unrestricted: a real browser widget making a cross-origin
+  // fetch/WebSocket-handshake call always sends Origin, so its absence
+  // here is itself a signal something isn't a normal embed.
+  if (apiKey.allowedOrigins && apiKey.allowedOrigins.length > 0) {
+    const origin = request.headers.origin;
+    const hostname = typeof origin === "string" ? normalizeOrigin(origin) : null;
+    if (!hostname || !apiKey.allowedOrigins.includes(hostname)) {
+      reply.code(401).send({ error: "Invalid API key." });
+      return;
+    }
   }
 
   request.workspaceId = apiKey.workspaceId;
