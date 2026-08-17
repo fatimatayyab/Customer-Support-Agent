@@ -7,6 +7,7 @@ export {
   findInvitationByTokenHash,
   findWorkspaceSignupInviteByTokenHash,
   claimWorkspaceSignupInvite,
+  touchApiKeyLastUsed,
 } from "./auth-resolver-client.js";
 export {
   findPlatformAdminByEmail,
@@ -19,5 +20,12 @@ export {
   revokeWorkspaceSignupInviteForPlatform,
   insertPlatformAuditLog,
   listPlatformAuditLogForWorkspace,
+  getWorkspaceUsageForPlatform,
+  countKnowledgeSourcesForPlatform,
+  listIntegrationsForPlatform,
+  listApiKeysForPlatform,
+  revokeApiKeyForPlatform,
+  getWorkspacePlatformMetaForPlatform,
+  upsertWorkspacePlatformMetaForPlatform,
 } from "./platform-operator-client.js";
 export * from "./schema/index.js";

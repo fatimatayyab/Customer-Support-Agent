@@ -7,13 +7,20 @@ import {
   listWorkspaceInvites,
   listWorkspaces,
   reactivateWorkspace,
+  revokeWorkspaceApiKey,
   revokeWorkspaceInvite,
   suspendWorkspace,
+  updateWorkspaceMeta,
 } from "./platform.service.js";
 
 const createInviteSchema = z.object({
   email: z.string().email(),
   expiresInDays: z.number().int().positive().max(90).optional(),
+});
+
+const updateMetaSchema = z.object({
+  plan: z.string().max(100).nullable(),
+  billingNotes: z.string().max(2000).nullable(),
 });
 
 // Every route here is platform-admin-authenticated, cross-tenant by
@@ -43,6 +50,20 @@ export async function platformRoutes(app: FastifyInstance) {
     const workspace = await reactivateWorkspace(request.platformAdmin!.platformAdminId, request.params.id);
     reply.send({ workspace });
   });
+
+  app.patch<{ Params: { id: string } }>("/platform/workspaces/:id/meta", async (request, reply) => {
+    const body = updateMetaSchema.parse(request.body);
+    const meta = await updateWorkspaceMeta(request.platformAdmin!.platformAdminId, request.params.id, body);
+    reply.send({ meta });
+  });
+
+  app.post<{ Params: { id: string; keyId: string } }>(
+    "/platform/workspaces/:id/api-keys/:keyId/revoke",
+    async (request, reply) => {
+      await revokeWorkspaceApiKey(request.platformAdmin!.platformAdminId, request.params.id, request.params.keyId);
+      reply.code(204).send();
+    },
+  );
 
   app.post("/platform/workspace-invites", async (request, reply) => {
     const body = createInviteSchema.parse(request.body);

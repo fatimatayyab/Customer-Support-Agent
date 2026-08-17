@@ -14,6 +14,9 @@ interface WorkspaceRow {
   createdAt: string;
   ownerEmail: string | null;
   userCount: number;
+  plan: string | null;
+  widgetConfigured: boolean;
+  lastActivityAt: string | null;
 }
 
 interface WorkspaceInvite {
@@ -22,6 +25,17 @@ interface WorkspaceInvite {
   expiresAt: string;
   usedAt: string | null;
   createdAt: string;
+}
+
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return "no activity yet";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+  if (days <= 0) return "today";
+  if (days === 1) return "1 day ago";
+  if (days < 30) return `${days} days ago`;
+  const months = Math.floor(days / 30);
+  return months === 1 ? "1 month ago" : `${months} months ago`;
 }
 
 export default function PlatformHome() {
@@ -115,8 +129,19 @@ export default function PlatformHome() {
     return null;
   }
 
+  const now = new Date();
+  const stats = {
+    total: workspaces.length,
+    active: workspaces.filter((w) => w.status === "active").length,
+    suspended: workspaces.filter((w) => w.status === "suspended").length,
+    newThisMonth: workspaces.filter((w) => {
+      const created = new Date(w.createdAt);
+      return created.getFullYear() === now.getFullYear() && created.getMonth() === now.getMonth();
+    }).length,
+  };
+
   return (
-    <main className="mx-auto max-w-3xl px-4 py-10">
+    <main className="mx-auto max-w-4xl px-4 py-10">
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">Platform Owner</h1>
@@ -128,6 +153,13 @@ export default function PlatformHome() {
       </div>
 
       {actionError && <p className="mb-4 text-sm text-red-600">{actionError}</p>}
+
+      <section className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatTile label="Clients" value={stats.total} />
+        <StatTile label="Active" value={stats.active} />
+        <StatTile label="Suspended" value={stats.suspended} tone={stats.suspended > 0 ? "warn" : "default"} />
+        <StatTile label="New this month" value={stats.newThisMonth} />
+      </section>
 
       <section className="mb-10">
         <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Workspaces</h2>
@@ -141,7 +173,11 @@ export default function PlatformHome() {
                 </Link>
                 <div className="text-slate-500">
                   {workspace.slug} · {workspace.ownerEmail ?? "no owner"} · {workspace.userCount} user
-                  {workspace.userCount === 1 ? "" : "s"}
+                  {workspace.userCount === 1 ? "" : "s"} · {workspace.plan ?? "no plan set"}
+                </div>
+                <div className="text-slate-500">
+                  {workspace.widgetConfigured ? "widget configured" : "widget not configured"} · last activity{" "}
+                  {formatRelativeTime(workspace.lastActivityAt)}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-3">
@@ -235,5 +271,16 @@ export default function PlatformHome() {
         </ul>
       </section>
     </main>
+  );
+}
+
+function StatTile({ label, value, tone = "default" }: { label: string; value: number; tone?: "default" | "warn" }) {
+  return (
+    <div className="rounded-md border border-slate-200 p-3">
+      <div className={tone === "warn" && value > 0 ? "text-2xl font-semibold text-red-600" : "text-2xl font-semibold"}>
+        {value}
+      </div>
+      <div className="text-xs text-slate-500 uppercase tracking-wide">{label}</div>
+    </div>
   );
 }

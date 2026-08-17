@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { findApiKeyByHash } from "@csa/db";
+import { findApiKeyByHash, touchApiKeyLastUsed } from "@csa/db";
 import { hashApiKey } from "./api-key.js";
 
 /**
@@ -35,4 +35,9 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
   }
 
   request.workspaceId = apiKey.workspaceId;
+
+  // Un-awaited: this is a display-only "last used" timestamp, not part
+  // of the auth decision itself - no reason to add latency to every
+  // widget request waiting on it.
+  touchApiKeyLastUsed(apiKey.id).catch((error) => request.log.error(error, "touchApiKeyLastUsed failed"));
 }

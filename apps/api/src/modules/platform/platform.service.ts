@@ -1,13 +1,18 @@
 import {
+  getWorkspacePlatformMetaForPlatform,
+  getWorkspaceUsageForPlatform,
   insertPlatformAuditLog,
   insertWorkspaceSignupInviteForPlatform,
+  listApiKeysForPlatform,
   listPlatformAuditLogForWorkspace,
   listUsersForPlatform,
   listWorkspaceSignupInvitesForPlatform,
   listWorkspacesForPlatform,
   getWorkspaceForPlatform,
+  revokeApiKeyForPlatform,
   revokeWorkspaceSignupInviteForPlatform,
   updateWorkspaceStatusForPlatform,
+  upsertWorkspacePlatformMetaForPlatform,
 } from "@csa/db";
 import { env } from "../../config/env.js";
 import { NotFoundError } from "../../errors.js";
@@ -24,11 +29,49 @@ export async function getWorkspaceDetail(id: string) {
   if (!workspace) {
     throw new NotFoundError("Workspace not found.");
   }
-  const [users, auditLog] = await Promise.all([
+  const [users, auditLog, usage, apiKeys, meta] = await Promise.all([
     listUsersForPlatform(id),
     listPlatformAuditLogForWorkspace(id),
+    getWorkspaceUsageForPlatform(id),
+    listApiKeysForPlatform(id),
+    getWorkspacePlatformMetaForPlatform(id),
   ]);
-  return { workspace, users, auditLog };
+  return { workspace, users, auditLog, usage, apiKeys, meta };
+}
+
+export async function updateWorkspaceMeta(
+  platformAdminId: string,
+  workspaceId: string,
+  params: { plan: string | null; billingNotes: string | null },
+) {
+  const meta = await upsertWorkspacePlatformMetaForPlatform(workspaceId, params);
+  // Always logged, unlike suspend/reactivate which only ever have two
+  // possible values - a plan/notes edit is free text a future billing
+  // question will want the full before/after-adjacent context for.
+  await insertPlatformAuditLog({
+    platformAdminId,
+    action: "workspace.meta_updated",
+    targetWorkspaceId: workspaceId,
+    detail: params,
+  });
+  return meta;
+}
+
+export async function revokeWorkspaceApiKey(platformAdminId: string, workspaceId: string, keyId: string) {
+  const revoked = await revokeApiKeyForPlatform(workspaceId, keyId);
+  if (!revoked) {
+    throw new NotFoundError("API key not found or already revoked.");
+  }
+  // Distinguishable from a workspace owner revoking their own key
+  // (workspace.routes.ts's DELETE /workspaces/api-keys/:id) - same table,
+  // different actor, different audit trail, so an investigation into
+  // "who revoked this key" doesn't have to guess which log to check.
+  await insertPlatformAuditLog({
+    platformAdminId,
+    action: "workspace.api_key_revoked",
+    targetWorkspaceId: workspaceId,
+    detail: { keyId },
+  });
 }
 
 export async function suspendWorkspace(platformAdminId: string, workspaceId: string) {

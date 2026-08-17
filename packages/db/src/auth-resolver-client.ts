@@ -46,6 +46,16 @@ export async function findApiKeyByHash(keyHash: string) {
   return row ?? null;
 }
 
+// Fire-and-forget from requireApiKey - a pre-existing gap (the column
+// existed and was displayed in the dashboard, but nothing ever wrote it,
+// so every key showed "never used" regardless of real traffic). Doesn't
+// block the request on this write; a lost update under a race or a
+// dropped connection just means a slightly stale "last used" display,
+// never an auth-correctness issue.
+export async function touchApiKeyLastUsed(id: string): Promise<void> {
+  await authResolverDb.update(workspaceApiKeys).set({ lastUsedAt: sql`now()` }).where(eq(workspaceApiKeys.id, id));
+}
+
 export async function findWorkspaceBySlug(slug: string) {
   const [row] = await authResolverDb
     .select({ id: workspaces.id, slug: workspaces.slug, status: workspaces.status })
