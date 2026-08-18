@@ -5,6 +5,8 @@ const TYPING_STOP_DELAY_MS = 2000;
 
 interface ChatPanelProps {
   workspaceName: string;
+  avatarUrl: string | null;
+  greetingMessage: string | null;
   connected: boolean;
   reconnecting: boolean;
   messages: WireMessage[];
@@ -123,6 +125,8 @@ function EscalationContactOffer({
 
 export function ChatPanel({
   workspaceName,
+  avatarUrl,
+  greetingMessage,
   connected,
   reconnecting,
   messages,
@@ -170,7 +174,10 @@ export function ChatPanel({
   return (
     <div class="panel">
       <header class="panel-header">
-        <span>{workspaceName}</span>
+        <span class="panel-header-title">
+          {avatarUrl && <img class="avatar" src={avatarUrl} alt="" />}
+          <span>{workspaceName}</span>
+        </span>
         <button type="button" class="panel-close" onClick={onClose} aria-label="Close chat">
           &times;
         </button>
@@ -178,6 +185,7 @@ export function ChatPanel({
 
       <div class="panel-messages" ref={scrollRef}>
         {!connected && <p class="panel-status">{reconnecting ? "Reconnecting..." : "Connecting..."}</p>}
+        {greetingMessage && <div class="message message-ai">{greetingMessage}</div>}
         {messages.map((message) => (
           <div key={message.id}>
             <div class={`message message-${message.senderType}`}>{message.content}</div>

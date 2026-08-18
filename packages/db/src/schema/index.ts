@@ -18,3 +18,4 @@ export * from "./workspace-signup-invites.js";
 export * from "./platform-admins.js";
 export * from "./platform-audit-log.js";
 export * from "./workspace-platform-meta.js";
+export * from "./workspace-widget-settings.js";

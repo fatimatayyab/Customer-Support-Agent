@@ -157,7 +157,7 @@ Handles escalated conversations and collaborates with the AI Support Agent.
 3. Upload business knowledge.
 4. Configure the AI Support Agent.
 5. Connect business integrations.
-6. Customize the chat widget.
+6. Customize the assistant's appearance (name, avatar, greeting, color, position) - installation itself is automatic, not a manual setup step.
 7. Deploy to the website.
 
 ---
@@ -191,6 +191,8 @@ The platform must support:
 - Conversation History
 - Branding & Customization
 - Billing & Subscription Management
+
+**Website Chat Widget & Branding & Customization, agreed direction:** the widget's identity/credential is system-managed and never presented to the workspace owner as an "API key" or comparable technical concept to create/configure. The owner-facing experience is Install (ready-to-use installation, site management, install status) and Appearance (assistant name, avatar, greeting, color/theme, position). Technical controls - domain restrictions, credential rotation/revocation, raw embed code - live under an Advanced/Developer area, not the primary flow. The widget should present as the customer's own AI support assistant, not as an API integration to be wired up.
 
 ---
 
@@ -363,6 +365,7 @@ Future capabilities may include:
 - Integration Marketplace
 - Advanced Analytics
 - Multi-language Support
+- Channel-Specific Context Awareness (each channel, including Omnichannel Messaging above, defines its own context signals - the website widget's is current page URL/title; deeper page-content awareness is deferred and should be unified with website knowledge ingestion rather than built as a separate mechanism, not built as a generic cross-channel assumption)
 
 ---
 

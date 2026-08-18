@@ -138,37 +138,60 @@ export function Widget({ config }: { config: WidgetConfig }) {
   }
 
   if (identify.state !== "ready") {
+    // Nothing is known about appearance yet at this point - the built-in
+    // defaults (no theming, bottom-right) are exactly what an
+    // un-configured workspace always renders anyway, so there's nothing
+    // wrong with this branch never reading workspace_widget_settings.
     return (
-      <div class="bubble">
-        {identify.state === "loading" && <span>Loading...</span>}
-        {identify.state === "error" && <span class="error">{identify.message}</span>}
+      <div class="widget-root">
+        <div class="bubble">
+          {identify.state === "loading" && <span>Loading...</span>}
+          {identify.state === "error" && <span class="error">{identify.message}</span>}
+        </div>
       </div>
     );
   }
 
+  // identify.state === "ready" is narrowed from here on, so
+  // identify.workspace is never null - computed after the early return
+  // above, not before, specifically so TypeScript can prove that.
+  const settings = identify.workspace;
+  const displayName = settings.assistantName ?? settings.name;
+  // "position-left" is a class toggle, not a CSS variable - left/right
+  // is a discrete choice, not a continuous value.
+  const wrapperClass = settings.position === "left" ? "widget-root position-left" : "widget-root";
+  const wrapperStyle = settings.primaryColor ? { "--csa-primary-color": settings.primaryColor } : undefined;
+
   if (!open) {
     return (
-      <button type="button" class="bubble bubble-button" onClick={() => setOpen(true)}>
-        Chat with {identify.workspace.name}
-      </button>
+      <div class={wrapperClass} style={wrapperStyle}>
+        <button type="button" class="bubble bubble-button" onClick={() => setOpen(true)}>
+          {settings.avatarUrl && <img class="avatar" src={settings.avatarUrl} alt="" />}
+          Chat with {displayName}
+        </button>
+      </div>
     );
   }
 
   return (
-    <ChatPanel
-      workspaceName={identify.workspace.name}
-      connected={connected}
-      reconnecting={reconnecting}
-      messages={messages}
-      typing={typing}
-      canRate={conversationId !== null}
-      rating={rating}
-      onRate={handleRate}
-      contactSubmitted={contactSubmitted}
-      onSubmitContact={handleSubmitContact}
-      onSend={handleSend}
-      onTyping={handleTyping}
-      onClose={() => setOpen(false)}
-    />
+    <div class={wrapperClass} style={wrapperStyle}>
+      <ChatPanel
+        workspaceName={displayName}
+        avatarUrl={settings.avatarUrl}
+        greetingMessage={settings.greetingMessage}
+        connected={connected}
+        reconnecting={reconnecting}
+        messages={messages}
+        typing={typing}
+        canRate={conversationId !== null}
+        rating={rating}
+        onRate={handleRate}
+        contactSubmitted={contactSubmitted}
+        onSubmitContact={handleSubmitContact}
+        onSend={handleSend}
+        onTyping={handleTyping}
+        onClose={() => setOpen(false)}
+      />
+    </div>
   );
 }

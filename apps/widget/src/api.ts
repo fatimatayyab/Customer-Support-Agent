@@ -3,6 +3,16 @@ import type { WidgetConfig } from "./config.js";
 export interface IdentifiedWorkspace {
   id: string;
   name: string;
+  // Appearance layer (Chat Widget direction, docs/00 §9/§10) - all
+  // nullable except position, mirroring exactly what
+  // workspace-identification/identify.routes.ts falls back to when a
+  // workspace has never saved settings. Widget.tsx/ChatPanel.tsx read
+  // these; nothing here is AI behavior/configuration, a separate concern.
+  assistantName: string | null;
+  greetingMessage: string | null;
+  primaryColor: string | null;
+  position: "left" | "right";
+  avatarUrl: string | null;
 }
 
 // Mirrors the Support Orchestrator's request lifecycle Workspace

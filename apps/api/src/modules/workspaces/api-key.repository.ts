@@ -16,6 +16,19 @@ export async function insertApiKey(
   return assertDefined(apiKey, "insertApiKey: INSERT ... RETURNING produced no row.");
 }
 
+// Includes allowedOrigins/revokedAt (never selected into the workspace-
+// owner-facing list response) - this is an internal lookup for the
+// rotate flow, which needs to read a key's current settings before
+// revoking it, not a route response shape.
+export async function getApiKeyById(scopedDb: ScopedDb, workspaceId: string, id: string) {
+  const [apiKey] = await scopedDb
+    .select()
+    .from(workspaceApiKeys)
+    .where(and(eq(workspaceApiKeys.id, id), eq(workspaceApiKeys.workspaceId, workspaceId)))
+    .limit(1);
+  return apiKey ?? null;
+}
+
 export async function listActiveApiKeys(scopedDb: ScopedDb, workspaceId: string) {
   return scopedDb
     .select({

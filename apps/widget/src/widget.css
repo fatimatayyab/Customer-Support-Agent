@@ -3,11 +3,21 @@
   position: fixed;
   bottom: 20px;
   right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-family:
     system-ui,
     -apple-system,
     sans-serif;
-  background: #0f172a;
+  /* Falls back to the original hardcoded navy when a workspace hasn't
+     set a primaryColor - this is the one theming hook Appearance (Phase
+     2's workspace_widget_settings) actually feeds. Only ever applied to
+     filled backgrounds paired with white text, never to a text color -
+     an arbitrary owner-chosen color used as a text color on a light
+     background risks unreadable contrast; a filled dark-ish button with
+     white text degrades far more gracefully. */
+  background: var(--csa-primary-color, #0f172a);
   color: white;
   padding: 12px 18px;
   border-radius: 9999px;
@@ -23,6 +33,31 @@
 
 .bubble .error {
   color: #fca5a5;
+}
+
+.avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+/* Mirrors .bubble/.panel's own right-offset rules exactly, just for the
+   left side - a discrete left/right choice, not a continuous value, so
+   a class toggle (set on the wrapping container by Widget.tsx from
+   workspace.position) is more correct here than a CSS custom property
+   would be. Descendant selectors, not compound - "position-left" is set
+   on the wrapper Widget.tsx renders around whichever of .bubble/.panel
+   is actually showing, not on .bubble/.panel themselves. */
+.position-left .bubble {
+  left: 20px;
+  right: auto;
+}
+
+.position-left .panel {
+  left: 20px;
+  right: auto;
 }
 
 .config-prompt {
@@ -111,14 +146,63 @@
   z-index: 2147483000;
 }
 
+/* Below this width, a floating 320x440 card either overflows the
+   viewport or leaves an awkward margin around it - full-screen is the
+   standard mobile pattern for this class of widget (Intercom, Crisp,
+   Drift all do this). 480px, not a device-specific breakpoint: this
+   should trigger for "phone-sized viewport," not "iPhone specifically." */
+@media (max-width: 480px) {
+  .panel {
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    /* 100vh first as a fallback for browsers without dvh support - the
+       dvh line below simply doesn't apply there, it doesn't override
+       with an invalid value. dvh accounts for mobile browser chrome
+       (address bar) resizing the visible viewport, which vh doesn't. */
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  /* The home-indicator gesture area on notched phones sits under the
+     input row when the panel is truly edge-to-edge - without this the
+     send button can end up partially behind it. */
+  .panel-input {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .bubble {
+    bottom: 12px;
+    right: 12px;
+  }
+
+  .position-left .bubble {
+    left: 12px;
+    right: auto;
+  }
+}
+
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #0f172a;
+  background: var(--csa-primary-color, #0f172a);
   color: white;
   padding: 12px 16px;
   font-weight: 600;
+}
+
+.panel-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel-close {
@@ -155,7 +239,7 @@
 
 .message-customer {
   align-self: flex-end;
-  background: #0f172a;
+  background: var(--csa-primary-color, #0f172a);
   color: white;
   border-bottom-right-radius: 2px;
 }
@@ -225,7 +309,7 @@
 .panel-input button {
   all: unset;
   cursor: pointer;
-  background: #0f172a;
+  background: var(--csa-primary-color, #0f172a);
   color: white;
   padding: 8px 16px;
   border-radius: 9999px;
@@ -265,7 +349,7 @@
 .escalation-offer-actions button {
   all: unset;
   cursor: pointer;
-  background: #0f172a;
+  background: var(--csa-primary-color, #0f172a);
   color: white;
   padding: 6px 12px;
   border-radius: 9999px;

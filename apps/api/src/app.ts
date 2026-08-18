@@ -20,6 +20,7 @@ import { invitationRoutes } from "./modules/users/invitation.routes.js";
 import { userRoutes } from "./modules/users/user.routes.js";
 import { identifyRoutes } from "./modules/workspace-identification/identify.routes.js";
 import { workspaceRoutes } from "./modules/workspaces/workspace.routes.js";
+import { widgetSettingsRoutes } from "./modules/workspaces/widget-settings.routes.js";
 import { platformAuthRoutes } from "./modules/platform-auth/platform-auth.routes.js";
 import { platformRoutes } from "./modules/platform/platform.routes.js";
 
@@ -91,6 +92,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.register(authRoutes);
   app.register(workspaceRoutes);
+  app.register(widgetSettingsRoutes);
   app.register(identifyRoutes);
   app.register(widgetRealtimeRoutes);
   app.register(knowledgeRoutes);
