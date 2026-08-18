@@ -284,18 +284,28 @@ export default function WidgetPage() {
         )}
 
         {primary && !installBusy && (
-          <div className="flex items-center justify-between rounded-md border border-slate-200 p-3 text-sm">
-            <div>
-              <div className="font-medium text-emerald-700">✓ Installed</div>
-              <div className="text-slate-500">Last customer interaction: {formatRelativeTime(primary.lastUsedAt)}</div>
+          <div className="rounded-md border border-slate-200 p-3 text-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-medium text-emerald-700">✓ Installed</div>
+                <div className="text-slate-500">
+                  Last customer interaction: {formatRelativeTime(primary.lastUsedAt)}
+                </div>
+              </div>
+              {!revealedKey && canManageWidget && (
+                <button
+                  onClick={() => handleGetNewCode(primary.id)}
+                  className="shrink-0 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium"
+                >
+                  Get a new install code
+                </button>
+              )}
             </div>
             {!revealedKey && canManageWidget && (
-              <button
-                onClick={() => handleGetNewCode(primary.id)}
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium"
-              >
-                Get a new install code
-              </button>
+              <p className="mt-2 text-xs text-slate-500">
+                This replaces your current code for this same install - it doesn&apos;t add a second one. The old
+                code stops working the moment you do this, so update your site with the new one right away.
+              </p>
             )}
           </div>
         )}
@@ -427,6 +437,7 @@ export default function WidgetPage() {
                     <button
                       onClick={() => handleGetNewCode(key.id)}
                       disabled={advancedBusy === key.id}
+                      title="Replaces this site's code - the old one stops working immediately."
                       className="text-slate-600 underline disabled:opacity-50"
                     >
                       Rotate

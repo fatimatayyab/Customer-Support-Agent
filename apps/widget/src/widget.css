@@ -93,6 +93,12 @@
   line-height: 1.4;
 }
 
+.config-prompt-error {
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .config-prompt form {
   display: flex;
   gap: 8px;

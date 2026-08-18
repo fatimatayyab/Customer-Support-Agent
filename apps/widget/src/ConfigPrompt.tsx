@@ -4,7 +4,7 @@ import { useState } from "preact/hooks";
 // from either window.CSAWidgetConfig or the dev-only localStorage fallback
 // (see config.ts). A real embed always sets window.CSAWidgetConfig itself,
 // so a real customer's site never sees this.
-export function ConfigPrompt({ onSubmit }: { onSubmit: (apiKey: string) => void }) {
+export function ConfigPrompt({ message, onSubmit }: { message?: string | null; onSubmit: (apiKey: string) => void }) {
   const [value, setValue] = useState("");
 
   function handleSubmit(event: Event) {
@@ -19,6 +19,7 @@ export function ConfigPrompt({ onSubmit }: { onSubmit: (apiKey: string) => void 
   return (
     <div class="config-prompt">
       <p class="config-prompt-title">Widget not configured</p>
+      {message && <p class="config-prompt-error">{message}</p>}
       <p class="config-prompt-hint">
         Paste a workspace API key (Dashboard → Home → API Keys → Create). Remembered in this browser for next time.
       </p>

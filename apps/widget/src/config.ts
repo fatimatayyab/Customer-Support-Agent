@@ -59,3 +59,16 @@ function readStoredApiKey(): string | null {
 export function storeDevApiKey(apiKey: string): void {
   window.localStorage.setItem(LOCAL_STORAGE_KEY, apiKey);
 }
+
+// Used when a stored key stops working (workspace suspended, key
+// revoked/rotated since it was saved) - see main.tsx's Root(). Without
+// this, a stale key persists forever with no UI path to replace it,
+// since readConfig() only ever falls back to the prompt when nothing is
+// stored at all, not when what's stored no longer resolves.
+export function clearDevApiKey(): void {
+  try {
+    window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+  } catch {
+    // See readStoredApiKey - storage can throw in a locked-down context.
+  }
+}
