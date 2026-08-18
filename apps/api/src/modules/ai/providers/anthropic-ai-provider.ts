@@ -51,7 +51,7 @@ export class AnthropicAiProvider implements AiProvider {
       messages: [
         {
           role: "user",
-          content: buildUserContent(input.history, input.retrievedContext, input.customerMessage),
+          content: buildUserContent(input.history, input.retrievedContext, input.customerMessage, input.pageContext),
         },
       ],
       tools: [tool],

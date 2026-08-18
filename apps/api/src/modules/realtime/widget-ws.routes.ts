@@ -37,11 +37,20 @@ const initiateMessageSchema = z.object({
   }),
 });
 
+const MAX_PAGE_URL_LENGTH = 2048;
+const MAX_PAGE_TITLE_LENGTH = 300;
+
 const sendMessageSchema = z.object({
   type: z.literal("message:send"),
   payload: z.object({
     conversationId: z.string().uuid(),
     content: z.string().min(1).max(4000),
+    // The website channel's context signal - optional and capped, never
+    // strictly URL-validated: this is a soft signal for the AI prompt,
+    // not a security-relevant field, so a malformed value should just be
+    // dropped downstream, not reject an otherwise-valid customer message.
+    pageUrl: z.string().max(MAX_PAGE_URL_LENGTH).optional(),
+    pageTitle: z.string().max(MAX_PAGE_TITLE_LENGTH).optional(),
   }),
 });
 

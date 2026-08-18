@@ -104,7 +104,16 @@ export function Widget({ config }: { config: WidgetConfig }) {
     if (!conversationId) {
       return;
     }
-    connectionRef.current?.send("message:send", { conversationId, content });
+    // The website channel's first context signal (docs/00/02's Chat
+    // Widget direction) - current page URL/title only, captured fresh at
+    // send time since a visitor can navigate mid-conversation. Not a
+    // template for how any other future channel supplies context.
+    connectionRef.current?.send("message:send", {
+      conversationId,
+      content,
+      pageUrl: window.location.href,
+      pageTitle: document.title,
+    });
   }
 
   function handleTyping(isTyping: boolean) {

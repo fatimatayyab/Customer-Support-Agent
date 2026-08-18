@@ -798,3 +798,33 @@ Noticed while screenshotting the `support_agent` view: "Get a new install code" 
 **Verified live, both roles, in the same browser session:** as owner - "Get a new install code" hidden only because the just-auto-provisioned snippet was still showing (matches pre-existing, correct behavior, not a new bug), Rotate/Remove/"Add another site"/Save all present and clickable. As an invited `support_agent` - none of those five controls present (confirmed via `locator(...).count()`, not just a screenshot), while "✓ Installed," the site's name/prefix/domain-restriction text, and the (disabled) Appearance fields all remained visible. Zero console/page errors for either role. `pnpm -r run typecheck` clean across all 6 packages both before and after.
 
 All test data (two workspaces' worth across this milestone's two verification passes, their keys/settings/invited agents, both verification platform admins) removed afterward. Confirmed via direct query, repeatedly, that "f15 solutions," "build iq," and the user's real platform admin account were untouched.
+
+## Milestone: Chat Widget Redesign, Phase 5 (Page-Context AI Signal)
+
+**Status:** ✅ Completed & Verified. Closes out the full Chat Widget redesign sequence (Phases 0-5) agreed after the first-principles review.
+
+Implements the direction agreed and recorded in `docs/00`/`docs/02`: the AI core stays channel-agnostic, but context is channel-specific, and the website widget's first (and so far only) context signal is the customer's current page URL/title - informational only, never a universal AI assumption, never generalized into a cross-channel field ahead of a second channel actually needing one.
+
+### Key Deliverables Built
+
+- **Widget capture** (`Widget.tsx`): `handleSend` reads `window.location.href`/`document.title` fresh at send time (a visitor can navigate mid-conversation) and sends them alongside `conversationId`/`content` on `message:send`.
+- **Transport + persistence**: `sendMessageSchema` (`widget-ws.routes.ts`) accepts optional `pageUrl`/`pageTitle`; the Orchestrator (`handleCustomerMessage`) stores them on the customer message's own `metadata` (`message.repository.ts`'s `MessageMetadata` extended) - a per-message fact, not conversation-level state, since only some messages in a resumed conversation will ever carry one.
+- **Threading into generation**: `generateAiReply` gained a new positional `pageContext` parameter (before `deps`); `GenerateReplyInput` (`ai-provider.ts`) carries it through the AI Service boundary as `{ url, title }`, deliberately named/shaped for this one channel rather than as a generic passthrough `context` field.
+- **Prompt change**: `buildUserContent` (`support-reply.prompt.ts`) appends a `Customer is currently viewing: ...` line after the Knowledge Context block when present - no new system-prompt instruction telling the model to weight it specially, matching the "informational, not a directive" agreement. `PROMPT_VERSION` bumped 2→3 so replies keep reporting which prompt shape produced them. Both providers (`gemini-ai-provider.ts`, `anthropic-ai-provider.ts`) pass `input.pageContext` through their existing `buildUserContent` call site - no per-provider branching needed.
+
+### Found During Verification, Then Fixed (Pre-Existing, Unrelated to Phase 5)
+
+Running the full verification baseline surfaced three pre-existing test-infrastructure gaps, none caused by this phase's changes:
+- `csa_test` had never been migrated with every table added over the course of this whole engagement (`platform_admins`, `platform_audit_log`, `workspace_platform_meta`, `workspace_widget_settings`) - fixed by re-running `pnpm --filter @csa/db test:db:setup`.
+- `tenant-isolation.test.ts`'s generic per-table RLS loop had no registered fixture for `workspace_widget_settings` or `workspace_platform_meta`, both added in earlier milestones. Root cause was two distinct issues: (a) both tables use `workspace_id` itself as the primary key with no separate `id` column, which broke the loop's hardcoded `column.name === "id"` lookup - fixed generically with a fallback to `column.primary`; (b) `workspace_platform_meta` is fundamentally incompatible with the loop's app_user-based methodology, since it's `platform_operator`-only with zero RLS policies grantable to `app_user` - fixed by excluding it from the generic loop entirely (with an inline comment explaining why), since its isolation had already been verified directly via `psql -U platform_operator` grant checks when it was first built, not by forcing a fixture that could never pass.
+
+### Verified
+
+- `pnpm -r run typecheck` clean across all 6 packages.
+- `pnpm --filter @csa/db test` - 23/23 passed (after the fixture fixes above).
+- `pnpm --filter @csa/api test` - 82/82 passed, including the full Support Orchestrator suite exercising the modified `handleCustomerMessage`/`generateAiReply` signatures.
+- **Live, end-to-end, in a real browser (Playwright), against a disposable workspace with a real knowledge source:** opened the widget's dev harness page, sent a real chat message, and confirmed via direct DB query that the customer message's `metadata` contained the exact real `pageUrl`/`pageTitle` captured from the live page (`http://localhost:5173/` / `"Widget dev harness"`) - not a mocked or hand-constructed value. Repeated three times.
+- **Confirmed the payload actually sent to the AI provider carries the signal**: Gemini's `gemini-flash-latest` model was returning a transient `503 UNAVAILABLE` ("high demand... temporary") for the entire verification window, an external outage unrelated to this change (confirmed via the structured error Gemini itself returned, captured in the conversation's escalation metadata - the Orchestrator's existing error-handling/escalation fallback triggered correctly each time). To verify the request construction independent of Gemini's availability, ran `buildUserContent` directly with the same inputs and confirmed the exact string sent to the provider includes the `Customer is currently viewing: ...` line in the right place, immediately after the Knowledge Context block.
+- Noted gap: `support-orchestrator.test.ts` has no assertion specifically covering `pageContext` threading - the 82 passing tests confirm nothing broke, not that this path has dedicated unit coverage. Left as-is per this session's scope (verify via live check, not required to add new tests).
+
+All test data (one disposable workspace, its owner, API key, knowledge source, and the disposable platform admin used to provision it) removed afterward. Confirmed via direct query that "f15 solutions," "build iq," and the user's real platform admin account were untouched.

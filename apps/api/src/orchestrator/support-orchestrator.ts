@@ -152,9 +152,16 @@ interface HandleCustomerMessageParams {
   workspaceId: string;
   conversationId: string;
   content: string;
+  // The website channel's context signal - only ever present when the
+  // widget sent it (docs/00/02's Chat Widget direction: channel-specific,
+  // never a universal assumption). Absent for any other future channel.
+  pageUrl?: string;
+  pageTitle?: string;
 }
 
 export async function handleCustomerMessage(params: HandleCustomerMessageParams, deps: OrchestratorDeps = {}) {
+  const pageContext = params.pageUrl ? { url: params.pageUrl, title: params.pageTitle ?? "" } : undefined;
+
   const { message, assignedUserId } = await withWorkspaceContext(params.workspaceId, async (scopedDb) => {
     const conversation = await getConversationById(scopedDb, params.workspaceId, params.conversationId);
     if (!conversation) {
@@ -166,6 +173,7 @@ export async function handleCustomerMessage(params: HandleCustomerMessageParams,
       conversationId: params.conversationId,
       senderType: "customer",
       content: params.content,
+      ...(pageContext ? { metadata: { pageUrl: pageContext.url, pageTitle: pageContext.title } } : {}),
     });
 
     return { message: inserted, assignedUserId: conversation.assignedUserId };
@@ -190,7 +198,7 @@ export async function handleCustomerMessage(params: HandleCustomerMessageParams,
   if (!assignedUserId) {
     const jobRunner = deps.jobRunner ?? getDefaultJobRunner();
     await jobRunner.run(() =>
-      generateAiReply(params.workspaceId, params.conversationId, params.content, deps).catch(() => {}),
+      generateAiReply(params.workspaceId, params.conversationId, params.content, pageContext, deps).catch(() => {}),
     );
   }
 
@@ -211,6 +219,7 @@ async function generateAiReply(
   workspaceId: string,
   conversationId: string,
   customerMessage: string,
+  pageContext: { url: string; title: string } | undefined,
   deps: OrchestratorDeps = {},
 ): Promise<void> {
   publishToConversation(conversationId, { type: "typing:start", payload: {} });
@@ -282,6 +291,7 @@ async function generateAiReply(
           similarity: chunk.similarity,
         })),
         customerMessage,
+        pageContext,
       },
       deps.aiProvider,
     );

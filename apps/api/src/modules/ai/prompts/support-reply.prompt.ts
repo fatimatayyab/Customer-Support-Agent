@@ -24,7 +24,11 @@ import type { RetrievedContext } from "../ai-provider.js";
 // v2: rewrote the style guidance (see buildSystemPrompt) to fix replies
 // reading as long, markdown-formatted, and AI-assistant-voiced instead
 // of a short, plain-text, human-agent-sounding chat message.
-export const PROMPT_VERSION = 2;
+// v3: buildUserContent optionally appends the website widget's page-
+// context signal (current page URL/title) after the Knowledge Context
+// block - informational only, no new system-prompt instruction telling
+// the model to weight or act on it specially.
+export const PROMPT_VERSION = 3;
 
 export const RESPOND_TO_CUSTOMER_TOOL_NAME = "respond_to_customer";
 export const RESPOND_TO_CUSTOMER_TOOL_DESCRIPTION =
@@ -91,6 +95,7 @@ export function buildUserContent(
   history: { senderType: string; content: string }[],
   retrievedContext: RetrievedContext[],
   customerMessage: string,
+  pageContext?: { url: string; title: string },
 ): string {
   const historyBlock = history.length
     ? history.map((turn) => `${turn.senderType}: ${turn.content}`).join("\n")
@@ -98,11 +103,21 @@ export function buildUserContent(
 
   const contextBlock = retrievedContext.map((chunk, index) => `[${index + 1}] ${chunk.content}`).join("\n\n");
 
+  // Informational only - the customer's current page, if the website
+  // widget sent one. No instruction telling the model to weight this
+  // specially; it's additional context, not a directive, and it's never
+  // assumed present (a resumed conversation's earlier messages won't
+  // have one attached, and any future channel may never supply one at
+  // all - see GenerateReplyInput.pageContext).
+  const pageContextBlock = pageContext
+    ? `\n\nCustomer is currently viewing: ${pageContext.title || pageContext.url} (${pageContext.url})`
+    : "";
+
   return `Conversation so far:
 ${historyBlock}
 
 Knowledge Context:
-${contextBlock}
+${contextBlock}${pageContextBlock}
 
 Customer's latest message: ${customerMessage}`;
 }

@@ -210,6 +210,16 @@ const fixtures: Record<string, FixtureBuilder> = {
     return must(escalation, "conversation_escalations fixture: INSERT ... RETURNING produced no row.");
   },
 
+  // workspace_id is this table's own primary key (1:1 with a workspace,
+  // no separate id column) - the returned { id } aliases that value so
+  // the generic check above can use it, even though the real column is
+  // named workspace_id (see this file's idColumn fallback comment).
+  workspace_widget_settings: async (scopedDb, workspaceId) => {
+    const [row] = await scopedDb.insert(schema.workspaceWidgetSettings).values({ workspaceId }).returning();
+    const inserted = must(row, "workspace_widget_settings fixture: INSERT ... RETURNING produced no row.");
+    return { id: inserted.workspaceId };
+  },
+
   invitations: async (scopedDb, workspaceId) => {
     const user = await insertMinimalUser(scopedDb, workspaceId);
     const [invitation] = await scopedDb
@@ -227,9 +237,25 @@ const fixtures: Record<string, FixtureBuilder> = {
   },
 };
 
+// workspace_platform_meta is deliberately excluded here even though it
+// has a workspace_id column: this generic loop's methodology (insert a
+// fixture via app_user/withWorkspaceContext, then check app_user-scoped
+// visibility across workspaces) assumes every table it covers is
+// reachable through the normal app_user + RLS path at all. That table
+// isn't - it's RLS-enabled with zero policies, exclusively reachable via
+// the separate platform_operator BYPASSRLS role (packages/db/src/
+// platform-operator-client.ts), the same "hard deny for app_user"
+// pattern platform_admins/workspace_signup_invites already use (neither
+// of those two ends up in this loop either, since they have no
+// workspace_id column at all). Its isolation guarantee - a role most
+// code can't even connect as, not "RLS filters app_user's rows" - was
+// verified directly instead (this session's `psql -U platform_operator`
+// checks confirming SELECT/UPDATE grants are exactly as narrow as
+// documented), which is the correct test for what that table actually is.
 const tenantTables = (Object.values(schema) as unknown[])
   .filter((value): value is PgTable => is(value, PgTable))
-  .filter((table) => getTableConfig(table).columns.some((column) => column.name === "workspace_id"));
+  .filter((table) => getTableConfig(table).columns.some((column) => column.name === "workspace_id"))
+  .filter((table) => getTableConfig(table).name !== "workspace_platform_meta");
 
 describe("Row-Level Security: generic per-table tenant isolation", () => {
   afterEach(async () => {
@@ -255,9 +281,18 @@ describe("Row-Level Security: generic per-table tenant isolation", () => {
 
       const row = await withWorkspaceContext(workspaceAId, (scopedDb) => buildRow(scopedDb, workspaceAId));
 
+      // Falls back to whichever column is the actual primary key when
+      // there's no column literally named "id" - workspace_widget_settings
+      // (and workspace_platform_meta, excluded from this loop below for a
+      // different reason) use workspace_id itself as their primary key
+      // rather than a separate id column, since they're 1:1 with a
+      // workspace. Fixtures for such a table return { id: <that value> }
+      // even though the underlying column isn't named "id" - FixtureRow
+      // is a JS-level contract for the test, not tied to the real column name.
       const idColumn = must(
-        getTableConfig(table).columns.find((column) => column.name === "id"),
-        `Table "${tableName}" has no "id" column - can't build a generic RLS check for it.`,
+        getTableConfig(table).columns.find((column) => column.name === "id") ??
+          getTableConfig(table).columns.find((column) => column.primary),
+        `Table "${tableName}" has no "id" or primary-key column - can't build a generic RLS check for it.`,
       );
 
       const rowsVisibleToWorkspaceA = await withWorkspaceContext(workspaceAId, (scopedDb) =>

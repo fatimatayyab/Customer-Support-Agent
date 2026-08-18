@@ -29,6 +29,12 @@ export interface GenerateReplyInput {
   history: ConversationTurn[];
   retrievedContext: RetrievedContext[];
   customerMessage: string;
+  // The website widget's context signal (docs/00/02's Chat Widget
+  // direction: current page URL/title, nothing more) - deliberately not
+  // named/shaped as a generic cross-channel "context" field. A future
+  // channel (messaging, voice) defines and adds its own, it doesn't
+  // reuse or generalize this one.
+  pageContext?: { url: string; title: string };
 }
 
 export interface Citation {

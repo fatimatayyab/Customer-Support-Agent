@@ -50,7 +50,7 @@ export class GeminiAiProvider implements AiProvider {
 
     const response = await client.models.generateContent({
       model: MODEL,
-      contents: buildUserContent(input.history, input.retrievedContext, input.customerMessage),
+      contents: buildUserContent(input.history, input.retrievedContext, input.customerMessage, input.pageContext),
       config: {
         systemInstruction: buildSystemPrompt(input.workspaceName),
         maxOutputTokens: MAX_OUTPUT_TOKENS,

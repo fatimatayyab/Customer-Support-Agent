@@ -21,6 +21,11 @@ export interface MessageMetadata {
   finishReason?: string;
   escalated?: boolean;
   escalationReason?: EscalationReason;
+  // Populated only on 'customer' messages, only when the website widget
+  // sent one (docs/00/02's Chat Widget direction - channel-specific
+  // context, not assumed present for every message/channel).
+  pageUrl?: string;
+  pageTitle?: string;
 }
 
 type NewMessage = Pick<
