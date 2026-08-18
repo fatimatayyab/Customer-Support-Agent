@@ -769,3 +769,32 @@ New table `workspace_widget_settings` (`workspace_id` PK/FK, `assistant_name`/`g
 **One real bug caught by this pass, unrelated to any of the four phases' own code:** the dashboard's `/widget` page 404'd on `_next/static/chunks/app/widget/page.js` and rendered blank on first attempt - a stale Next.js dev-server chunk reference from a `next dev` process that had been running for over an hour through many hot-reloads, not a defect in the shipped code. Confirmed by clearing `.next` and restarting the dev server, after which the identical test passed cleanly. Worth knowing as a recurring dev-environment quirk, not something to chase in the codebase itself.
 
 All test data from every phase's verification, including this follow-up visual pass, removed afterward. Confirmed via direct query, repeatedly, that "f15 solutions," the user's own real "build iq" workspace, and the user's real platform admin account were untouched throughout.
+
+## Milestone: Chat Widget Redesign, Phase 4 (Appearance Dashboard Form)
+
+**Status:** ✅ Completed & Verified. Closes out the Chat Widget redesign - all four phases now shipped.
+
+Builds the owner-facing form on `apps/dashboard/app/widget/page.tsx` over the settings Phase 2 shipped and Phase 3 already renders - the sequencing bet that "ship the backend and rendering first, the form last" would mean nothing here is ever a dead setting paid off: every field this form edits was already visibly working before this form existed to edit it.
+
+### Key Deliverables Built
+
+- **Assistant name, greeting message, position (select), avatar URL (text + live preview image)** - straightforward controlled inputs, always submitting full form state on save (matching the "no partial-update ambiguity" contract `PUT /workspaces/widget-settings` already requires).
+- **Color via `<input type="color">`**, not a hex text field - a real picker beats asking an owner to know what a hex code is. Since the picker can't represent "unset," `BUILTIN_DEFAULT_COLOR` (`#0f172a`, matching `widget.css`'s own fallback exactly) doubles as the "not customized" sentinel: saving at that exact value sends `null`, not the literal string, so a workspace that never touches this field keeps behaving exactly as it did before this feature existed. A "Reset to default" link (shown only when the color differs from that sentinel, and only to a manager) sets it back.
+- **Client-side role gating** (`MANAGE_APPEARANCE_ROLES`, mirroring the pattern already used for API-key management): a `support_agent` can see current settings but every field is disabled and no Save/Reset control renders - backed by, never a substitute for, the backend's own `requireRole` check on the PUT route.
+
+### Verified
+
+- `pnpm -r run typecheck` clean across all 6 packages.
+- **Live, in a real browser (Playwright), against a disposable workspace:** filled every field, saved, confirmed the "Saved." confirmation, reloaded the page, and confirmed all five values persisted exactly (`name`, `color`, `position` read back via `page.inputValue()`, not just eyeballed). Zero console errors, zero page errors, zero failed requests throughout.
+- **Role gating confirmed both ways:** as owner, all fields editable and Save/Reset present; as an invited `support_agent`, all fields rendered disabled, no Save button, no Reset link - confirmed via `isDisabled()`/element-count checks, not just a screenshot.
+- **Validation confirmed live:** an invalid avatar URL submitted through the actual form surfaced "Invalid request." inline (the same generic Zod-validation message every other form in this dashboard already shows - not a new inconsistency).
+
+### Found During Verification, Then Fixed in the Same Milestone (Pre-Existing, Phase 1)
+
+Noticed while screenshotting the `support_agent` view: "Get a new install code" and the Advanced section's Rotate/Remove/"Add another site" controls were not client-side role-gated, unlike the new Appearance form. A `support_agent` could see and click them. Confirmed at the time this was not a security gap - `POST /workspaces/api-keys/:id/rotate` correctly returned 403 ("Only Owners and Administrators can manage API keys.") when actually attempted as that role - but it was a real UX inconsistency, made more visible by sitting next to Phase 4's form doing it correctly.
+
+**Closed out immediately after, in the same milestone, on explicit instruction:** introduced one shared `MANAGE_WIDGET_ROLES` constant (renamed from the Appearance-only `MANAGE_APPEARANCE_ROLES`, since it's the exact same boundary the backend already enforces on every widget-management route) and gated "Get a new install code," Rotate, Remove, and "Add another site" behind it - identical treatment to Appearance's own fields. A `support_agent` now sees install status, the site list (name, key prefix, domain restriction), and current appearance settings, but zero action controls anywhere on the page. The backend's own `requireRole` checks are unchanged - this only closes the client-side half of defense-in-depth that was already correct server-side.
+
+**Verified live, both roles, in the same browser session:** as owner - "Get a new install code" hidden only because the just-auto-provisioned snippet was still showing (matches pre-existing, correct behavior, not a new bug), Rotate/Remove/"Add another site"/Save all present and clickable. As an invited `support_agent` - none of those five controls present (confirmed via `locator(...).count()`, not just a screenshot), while "✓ Installed," the site's name/prefix/domain-restriction text, and the (disabled) Appearance fields all remained visible. Zero console/page errors for either role. `pnpm -r run typecheck` clean across all 6 packages both before and after.
+
+All test data (two workspaces' worth across this milestone's two verification passes, their keys/settings/invited agents, both verification platform admins) removed afterward. Confirmed via direct query, repeatedly, that "f15 solutions," "build iq," and the user's real platform admin account were untouched.

@@ -1,5 +1,6 @@
 "use client";
 
+import type { SessionUser } from "@csa/shared";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
@@ -7,6 +8,19 @@ import { ApiError, apiFetch } from "../../lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const DEFAULT_INSTALL_NAME = "Website";
+// Matches widget.css's own fallback (var(--csa-primary-color, #0f172a)) -
+// the color picker always needs a concrete value to display, so "still
+// at this value" is how the form represents "not customized" without a
+// separate reset toggle. Saving at this exact value sends null, not the
+// literal hex string, so a workspace that's never touched this field
+// keeps behaving exactly as it did before this feature existed.
+const BUILTIN_DEFAULT_COLOR = "#0f172a";
+// Same permission boundary the backend already enforces on every
+// widget-management route (POST/DELETE/rotate /workspaces/api-keys,
+// PUT /workspaces/widget-settings) - one shared constant so Install,
+// Advanced, and Appearance can never drift out of sync on who's allowed
+// to manage this page's controls.
+const MANAGE_WIDGET_ROLES = ["owner", "administrator"];
 
 interface ApiKeySummary {
   id: string;
@@ -15,6 +29,15 @@ interface ApiKeySummary {
   allowedOrigins: string[] | null;
   lastUsedAt: string | null;
   createdAt: string;
+}
+
+interface WidgetSettings {
+  assistantName: string | null;
+  greetingMessage: string | null;
+  primaryColor: string | null;
+  position: "left" | "right";
+  avatarUrl: string | null;
+  updatedAt: string | null;
 }
 
 function embedSnippet(apiKey: string): string {
@@ -43,6 +66,7 @@ function formatRelativeTime(iso: string | null): string {
 
 export default function WidgetPage() {
   const router = useRouter();
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[] | null>(null);
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const [installBusy, setInstallBusy] = useState(false);
@@ -52,6 +76,16 @@ export default function WidgetPage() {
   const [advancedError, setAdvancedError] = useState<string | null>(null);
   const [advancedBusy, setAdvancedBusy] = useState<string | null>(null);
 
+  const [assistantName, setAssistantName] = useState("");
+  const [greetingMessage, setGreetingMessage] = useState("");
+  const [primaryColor, setPrimaryColor] = useState(BUILTIN_DEFAULT_COLOR);
+  const [position, setPosition] = useState<"left" | "right">("right");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [appearanceLoaded, setAppearanceLoaded] = useState(false);
+  const [appearanceSaving, setAppearanceSaving] = useState(false);
+  const [appearanceError, setAppearanceError] = useState<string | null>(null);
+  const [appearanceSaved, setAppearanceSaved] = useState(false);
+
   async function refresh(): Promise<ApiKeySummary[]> {
     const data = await apiFetch<{ apiKeys: ApiKeySummary[] }>("/workspaces/api-keys");
     const keys = data?.apiKeys ?? [];
@@ -60,6 +94,18 @@ export default function WidgetPage() {
   }
 
   useEffect(() => {
+    apiFetch<{ user: SessionUser }>("/auth/me").then((data) => data && setSessionUser(data.user));
+
+    apiFetch<{ settings: WidgetSettings }>("/workspaces/widget-settings").then((data) => {
+      if (!data) return;
+      setAssistantName(data.settings.assistantName ?? "");
+      setGreetingMessage(data.settings.greetingMessage ?? "");
+      setPrimaryColor(data.settings.primaryColor ?? BUILTIN_DEFAULT_COLOR);
+      setPosition(data.settings.position);
+      setAvatarUrl(data.settings.avatarUrl ?? "");
+      setAppearanceLoaded(true);
+    });
+
     refresh()
       .then(async (keys) => {
         // First visit: nothing installed yet, so there's nothing to
@@ -91,6 +137,37 @@ export default function WidgetPage() {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function handleSaveAppearance(event: FormEvent) {
+    event.preventDefault();
+    setAppearanceSaving(true);
+    setAppearanceError(null);
+    setAppearanceSaved(false);
+    try {
+      const result = await apiFetch<{ settings: WidgetSettings }>("/workspaces/widget-settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          assistantName: assistantName.trim() || null,
+          greetingMessage: greetingMessage.trim() || null,
+          primaryColor: primaryColor === BUILTIN_DEFAULT_COLOR ? null : primaryColor,
+          position,
+          avatarUrl: avatarUrl.trim() || null,
+        }),
+      });
+      if (result) {
+        setAssistantName(result.settings.assistantName ?? "");
+        setGreetingMessage(result.settings.greetingMessage ?? "");
+        setPrimaryColor(result.settings.primaryColor ?? BUILTIN_DEFAULT_COLOR);
+        setPosition(result.settings.position);
+        setAvatarUrl(result.settings.avatarUrl ?? "");
+        setAppearanceSaved(true);
+      }
+    } catch (err) {
+      setAppearanceError(err instanceof ApiError ? err.message : "Could not save appearance settings.");
+    } finally {
+      setAppearanceSaving(false);
+    }
+  }
 
   async function copyToClipboard(text: string) {
     await navigator.clipboard.writeText(text);
@@ -165,6 +242,12 @@ export default function WidgetPage() {
     (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   );
   const primary = apiKeys.find((key) => key.name === DEFAULT_INSTALL_NAME) ?? byOldest[0];
+  // Gated client-side in addition to, never instead of, the backend's
+  // own requireRole checks - a support_agent can still see the install
+  // status, the site list, and current appearance settings, just not
+  // the actions that change any of them (rotate/remove/add a site, save
+  // appearance). Matches this page's every management route exactly.
+  const canManageWidget = sessionUser ? MANAGE_WIDGET_ROLES.includes(sessionUser.role) : false;
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">
@@ -206,7 +289,7 @@ export default function WidgetPage() {
               <div className="font-medium text-emerald-700">✓ Installed</div>
               <div className="text-slate-500">Last customer interaction: {formatRelativeTime(primary.lastUsedAt)}</div>
             </div>
-            {!revealedKey && (
+            {!revealedKey && canManageWidget && (
               <button
                 onClick={() => handleGetNewCode(primary.id)}
                 className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium"
@@ -215,6 +298,106 @@ export default function WidgetPage() {
               </button>
             )}
           </div>
+        )}
+      </section>
+
+      <section className="mb-10">
+        <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Appearance</h2>
+
+        {!appearanceLoaded && <p className="text-sm text-slate-500">Loading...</p>}
+
+        {appearanceLoaded && (
+          <form onSubmit={handleSaveAppearance} className="flex flex-col gap-3 rounded-md border border-slate-200 p-3">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Assistant name</span>
+              <input
+                value={assistantName}
+                onChange={(event) => setAssistantName(event.target.value)}
+                placeholder="Defaults to your workspace name"
+                disabled={!canManageWidget}
+                maxLength={100}
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500 disabled:opacity-50"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Greeting message</span>
+              <textarea
+                value={greetingMessage}
+                onChange={(event) => setGreetingMessage(event.target.value)}
+                placeholder="Shown as the first message when a customer opens the chat"
+                disabled={!canManageWidget}
+                maxLength={500}
+                rows={2}
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500 disabled:opacity-50"
+              />
+            </label>
+
+            <div className="flex items-end gap-4">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">Color</span>
+                <input
+                  type="color"
+                  value={primaryColor}
+                  onChange={(event) => setPrimaryColor(event.target.value)}
+                  disabled={!canManageWidget}
+                  className="h-9 w-14 cursor-pointer rounded border border-slate-300 disabled:opacity-50"
+                />
+              </label>
+              {canManageWidget && primaryColor !== BUILTIN_DEFAULT_COLOR && (
+                <button
+                  type="button"
+                  onClick={() => setPrimaryColor(BUILTIN_DEFAULT_COLOR)}
+                  className="pb-2 text-xs text-slate-500 underline"
+                >
+                  Reset to default
+                </button>
+              )}
+
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">Position</span>
+                <select
+                  value={position}
+                  onChange={(event) => setPosition(event.target.value as "left" | "right")}
+                  disabled={!canManageWidget}
+                  className="rounded-md border border-slate-300 px-2 py-2 text-sm disabled:opacity-50"
+                >
+                  <option value="right">Bottom right</option>
+                  <option value="left">Bottom left</option>
+                </select>
+              </label>
+            </div>
+
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-slate-700">Avatar URL</span>
+              <div className="flex items-center gap-2">
+                {avatarUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={avatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+                )}
+                <input
+                  value={avatarUrl}
+                  onChange={(event) => setAvatarUrl(event.target.value)}
+                  placeholder="https://example.com/avatar.png (optional)"
+                  disabled={!canManageWidget}
+                  className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500 disabled:opacity-50"
+                />
+              </div>
+            </label>
+
+            {appearanceError && <p className="text-sm text-red-600">{appearanceError}</p>}
+            {appearanceSaved && <p className="text-sm text-emerald-700">Saved.</p>}
+
+            {canManageWidget && (
+              <button
+                type="submit"
+                disabled={appearanceSaving}
+                className="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {appearanceSaving ? "Saving..." : "Save"}
+              </button>
+            )}
+          </form>
         )}
       </section>
 
@@ -239,46 +422,50 @@ export default function WidgetPage() {
                       : "not restricted to any domain"}
                   </div>
                 </div>
-                <div className="flex shrink-0 gap-3">
-                  <button
-                    onClick={() => handleGetNewCode(key.id)}
-                    disabled={advancedBusy === key.id}
-                    className="text-slate-600 underline disabled:opacity-50"
-                  >
-                    Rotate
-                  </button>
-                  <button
-                    onClick={() => handleRevoke(key.id)}
-                    disabled={advancedBusy === key.id}
-                    className="text-red-600 underline disabled:opacity-50"
-                  >
-                    Remove
-                  </button>
-                </div>
+                {canManageWidget && (
+                  <div className="flex shrink-0 gap-3">
+                    <button
+                      onClick={() => handleGetNewCode(key.id)}
+                      disabled={advancedBusy === key.id}
+                      className="text-slate-600 underline disabled:opacity-50"
+                    >
+                      Rotate
+                    </button>
+                    <button
+                      onClick={() => handleRevoke(key.id)}
+                      disabled={advancedBusy === key.id}
+                      className="text-red-600 underline disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
 
-          <form onSubmit={handleAddSite} className="flex flex-col gap-2">
-            <div className="flex gap-2">
+          {canManageWidget && (
+            <form onSubmit={handleAddSite} className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <input
+                  value={newSiteName}
+                  onChange={(event) => setNewSiteName(event.target.value)}
+                  placeholder="Site name (e.g. Blog)"
+                  required
+                  className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+                />
+                <button type="submit" className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white">
+                  Add another site
+                </button>
+              </div>
               <input
-                value={newSiteName}
-                onChange={(event) => setNewSiteName(event.target.value)}
-                placeholder="Site name (e.g. Blog)"
-                required
-                className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+                value={newSiteDomains}
+                onChange={(event) => setNewSiteDomains(event.target.value)}
+                placeholder="Restrict to domains, comma-separated (optional)"
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
               />
-              <button type="submit" className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white">
-                Add another site
-              </button>
-            </div>
-            <input
-              value={newSiteDomains}
-              onChange={(event) => setNewSiteDomains(event.target.value)}
-              placeholder="Restrict to domains, comma-separated (optional)"
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-            />
-          </form>
+            </form>
+          )}
         </div>
       </details>
     </main>
