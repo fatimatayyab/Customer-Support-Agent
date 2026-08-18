@@ -28,6 +28,14 @@ Thumbs.db
 
 coverage/
 
+# Ad-hoc Playwright verification output (Playwright's own conventional
+# directory names) - not a committed test suite, just throwaway output
+# from manual/agent verification passes. Screenshots taken during
+# verification belong in the scratchpad directory outside the repo, not
+# here - this is a safety net, not the primary place they should land.
+test-results/
+playwright-report/
+
 # Local-only reference doc, not part of the shared repo
 docs/Developer_Onboarding_Walkthrough.md
 HANDOFF.md

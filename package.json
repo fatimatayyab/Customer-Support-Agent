@@ -7,7 +7,12 @@
   },
   "packageManager": "pnpm@10.33.0",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "sharp", "@google/genai", "protobufjs"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "@google/genai",
+      "protobufjs"
+    ]
   },
   "scripts": {
     "bootstrap": "node scripts/setup.mjs",
@@ -23,5 +28,8 @@
     "lint": "pnpm -r run lint",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
   }
 }
