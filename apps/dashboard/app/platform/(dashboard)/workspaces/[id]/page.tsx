@@ -3,7 +3,13 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
-import { ApiError, apiFetch } from "../../../../lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody } from "@/components/ui/card";
+import { InlineError } from "@/components/ui/error-state";
+import { Input, Textarea } from "@/components/ui/field";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ApiError, apiFetch } from "@/lib/api";
 
 interface Workspace {
   id: string;
@@ -154,12 +160,12 @@ export default function PlatformWorkspaceDetailPage() {
 
   if (error) {
     return (
-      <main className="mx-auto max-w-2xl px-4 py-10">
-        <p className="text-sm text-red-600">{error}</p>
-        <Link href="/platform" className="mt-4 inline-block text-sm text-slate-500 underline">
+      <div>
+        <InlineError message={error} />
+        <Link href="/platform" className="mt-4 inline-block text-sm text-slate-500 hover:underline">
           Back
         </Link>
-      </main>
+      </div>
     );
   }
 
@@ -170,155 +176,146 @@ export default function PlatformWorkspaceDetailPage() {
   const { workspace, users, auditLog, usage, apiKeys } = detail;
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10">
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">{workspace.name}</h1>
-          <p className="text-sm text-slate-500">
-            {workspace.slug} · created {new Date(workspace.createdAt).toLocaleDateString()}
-          </p>
-        </div>
-        <Link href="/platform" className="text-sm text-slate-500 underline">
-          Back
+    <div className="flex flex-col gap-6">
+      <div>
+        <Link href="/platform" className="text-sm text-slate-500 hover:text-slate-700 hover:underline">
+          ← Workspaces
         </Link>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-semibold text-slate-900">{workspace.name}</h1>
+            <p className="text-sm text-slate-500">
+              {workspace.slug} · created {new Date(workspace.createdAt).toLocaleDateString()}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Badge tone={workspace.status === "active" ? "success" : "danger"}>{workspace.status}</Badge>
+            <Button size="sm" onClick={handleToggleStatus} disabled={busy}>
+              {workspace.status === "active" ? "Suspend workspace" : "Reactivate workspace"}
+            </Button>
+          </div>
+        </div>
       </div>
 
-      <section className="mb-10 flex items-center justify-between rounded-md border border-slate-200 p-4">
-        <span
-          className={
-            workspace.status === "active"
-              ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
-              : "rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700"
-          }
-        >
-          {workspace.status}
-        </span>
-        <button
-          onClick={handleToggleStatus}
-          disabled={busy}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {workspace.status === "active" ? "Suspend workspace" : "Reactivate workspace"}
-        </button>
-      </section>
+      <Tabs defaultValue="overview">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="keys">Widget &amp; Keys</TabsTrigger>
+          <TabsTrigger value="team">Team</TabsTrigger>
+          <TabsTrigger value="audit">Audit Log</TabsTrigger>
+        </TabsList>
 
-      <section className="mb-10">
-        <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Overview</h2>
-
-        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <MiniStat label="Conversations" value={usage.totalConversations} />
-          {usage.statusBreakdown.map((row) => (
-            <MiniStat key={row.status} label={row.status} value={row.count} />
-          ))}
-          <MiniStat label="Knowledge sources" value={usage.knowledgeSourceCount} />
-        </div>
-
-        <div className="mb-4 text-sm text-slate-500">
-          Integrations:{" "}
-          {usage.integrations.length === 0
-            ? "none connected"
-            : usage.integrations.map((i) => `${i.provider} (${i.status})`).join(", ")}
-        </div>
-
-        <form onSubmit={handleSaveMeta} className="rounded-md border border-slate-200 p-4">
-          <div className="mb-3 flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">Plan</span>
-            <input
-              value={plan}
-              onChange={(event) => setPlan(event.target.value)}
-              placeholder="e.g. trial, standard, custom"
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-            />
+        <TabsContent value="overview" className="pt-4">
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MiniStat label="Conversations" value={usage.totalConversations} />
+            {usage.statusBreakdown.map((row) => (
+              <MiniStat key={row.status} label={row.status} value={row.count} />
+            ))}
+            <MiniStat label="Knowledge sources" value={usage.knowledgeSourceCount} />
           </div>
-          <div className="mb-3 flex flex-col gap-1 text-sm">
-            <span className="font-medium text-slate-700">Billing notes</span>
-            <textarea
-              value={billingNotes}
-              onChange={(event) => setBillingNotes(event.target.value)}
-              placeholder="Internal notes only - never shown to this client."
-              rows={3}
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-            />
-          </div>
-          {metaError && <p className="mb-2 text-sm text-red-600">{metaError}</p>}
-          <button
-            type="submit"
-            disabled={savingMeta}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {savingMeta ? "Saving..." : "Save"}
-          </button>
-        </form>
-      </section>
 
-      <section className="mb-10">
-        <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Widget &amp; keys</h2>
-        {keyActionError && <p className="mb-2 text-sm text-red-600">{keyActionError}</p>}
-        <ul className="divide-y divide-slate-200 rounded-md border border-slate-200">
-          {apiKeys.length === 0 && <li className="p-3 text-sm text-slate-500">No API keys.</li>}
-          {apiKeys.map((key) => (
-            <li key={key.id} className="flex items-center justify-between gap-4 p-3 text-sm">
-              <div>
-                <div className="font-medium">
-                  {key.name} <code className="text-slate-500">{key.keyPrefix}...</code>
+          <div className="mb-4 text-sm text-slate-500">
+            Integrations:{" "}
+            {usage.integrations.length === 0
+              ? "none connected"
+              : usage.integrations.map((i) => `${i.provider} (${i.status})`).join(", ")}
+          </div>
+
+          <Card>
+            <CardBody>
+              <form onSubmit={handleSaveMeta} className="flex flex-col gap-3">
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">Plan</span>
+                  <Input value={plan} onChange={(event) => setPlan(event.target.value)} placeholder="e.g. trial, standard, custom" />
+                </label>
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">Billing notes</span>
+                  <Textarea
+                    value={billingNotes}
+                    onChange={(event) => setBillingNotes(event.target.value)}
+                    placeholder="Internal notes only - never shown to this client."
+                    rows={3}
+                  />
+                </label>
+                {metaError && <InlineError message={metaError} />}
+                <Button type="submit" disabled={savingMeta} className="self-start">
+                  {savingMeta ? "Saving..." : "Save"}
+                </Button>
+              </form>
+            </CardBody>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="keys" className="pt-4">
+          {keyActionError && (
+            <div className="mb-2">
+              <InlineError message={keyActionError} />
+            </div>
+          )}
+          <ul className="divide-y divide-slate-100 rounded-md border border-slate-200">
+            {apiKeys.length === 0 && <li className="p-3 text-sm text-slate-500">No API keys.</li>}
+            {apiKeys.map((key) => (
+              <li key={key.id} className="flex items-center justify-between gap-4 p-3 text-sm">
+                <div>
+                  <div className="font-medium text-slate-900">
+                    {key.name} <code className="text-slate-500">{key.keyPrefix}...</code>
+                  </div>
+                  <div className="text-slate-500">
+                    {key.revokedAt ? "revoked" : key.lastUsedAt ? `last used ${new Date(key.lastUsedAt).toLocaleString()}` : "never used"}
+                  </div>
                 </div>
+                {!key.revokedAt && (
+                  <button
+                    onClick={() => handleRevokeKey(key.id)}
+                    disabled={keyActionBusy === key.id}
+                    className="shrink-0 text-red-600 hover:underline disabled:opacity-50"
+                  >
+                    Revoke
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </TabsContent>
+
+        <TabsContent value="team" className="pt-4">
+          <ul className="divide-y divide-slate-100 rounded-md border border-slate-200">
+            {users.length === 0 && <li className="p-3 text-sm text-slate-500">No users.</li>}
+            {users.map((user) => (
+              <li key={user.id} className="flex items-center justify-between p-3 text-sm">
+                <div>
+                  <div className="font-medium text-slate-900">{user.name}</div>
+                  <div className="text-slate-500">{user.email}</div>
+                </div>
+                <span className="text-slate-500">{user.role}</span>
+              </li>
+            ))}
+          </ul>
+        </TabsContent>
+
+        <TabsContent value="audit" className="pt-4">
+          <ul className="divide-y divide-slate-100 rounded-md border border-slate-200">
+            {auditLog.length === 0 && <li className="p-3 text-sm text-slate-500">No platform actions recorded yet.</li>}
+            {auditLog.map((entry) => (
+              <li key={entry.id} className="p-3 text-sm">
+                <div className="font-medium text-slate-900">{entry.action}</div>
                 <div className="text-slate-500">
-                  {key.revokedAt ? "revoked" : key.lastUsedAt ? `last used ${new Date(key.lastUsedAt).toLocaleString()}` : "never used"}
+                  {entry.platformAdminEmail} · {new Date(entry.createdAt).toLocaleString()}
                 </div>
-              </div>
-              {!key.revokedAt && (
-                <button
-                  onClick={() => handleRevokeKey(key.id)}
-                  disabled={keyActionBusy === key.id}
-                  className="shrink-0 text-red-600 underline disabled:opacity-50"
-                >
-                  Revoke
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="mb-10">
-        <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Team</h2>
-        <ul className="divide-y divide-slate-200 rounded-md border border-slate-200">
-          {users.length === 0 && <li className="p-3 text-sm text-slate-500">No users.</li>}
-          {users.map((user) => (
-            <li key={user.id} className="flex items-center justify-between p-3 text-sm">
-              <div>
-                <div className="font-medium">{user.name}</div>
-                <div className="text-slate-500">{user.email}</div>
-              </div>
-              <span className="text-slate-500">{user.role}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Audit log</h2>
-        <ul className="divide-y divide-slate-200 rounded-md border border-slate-200">
-          {auditLog.length === 0 && <li className="p-3 text-sm text-slate-500">No platform actions recorded yet.</li>}
-          {auditLog.map((entry) => (
-            <li key={entry.id} className="p-3 text-sm">
-              <div className="font-medium">{entry.action}</div>
-              <div className="text-slate-500">
-                {entry.platformAdminEmail} · {new Date(entry.createdAt).toLocaleString()}
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </main>
+              </li>
+            ))}
+          </ul>
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }
 
 function MiniStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md border border-slate-200 p-3">
-      <div className="text-2xl font-semibold">{value}</div>
+    <Card className="p-3">
+      <div className="text-2xl font-semibold text-slate-900">{value}</div>
       <div className="text-xs text-slate-500 capitalize">{label}</div>
-    </div>
+    </Card>
   );
 }

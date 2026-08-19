@@ -1,10 +1,15 @@
 "use client";
 
-import type { SessionUser } from "@csa/shared";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
-import { ApiError, apiFetch } from "../../lib/api";
+import { Accordion } from "@/components/ui/accordion";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { InlineError } from "@/components/ui/error-state";
+import { Input, Select, Textarea } from "@/components/ui/field";
+import { useSession } from "@/lib/session-context";
+import { ApiError, apiFetch } from "@/lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 // The URL a REAL embedded widget (someone else's actual website) uses -
@@ -69,7 +74,7 @@ function formatRelativeTime(iso: string | null): string {
 
 export default function WidgetPage() {
   const router = useRouter();
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+  const { user: sessionUser } = useSession();
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[] | null>(null);
   // hasEverProvisioned distinguishes "never installed" (auto-provision a
   // default) from "installed once, then explicitly removed" (don't
@@ -142,8 +147,6 @@ export default function WidgetPage() {
   }
 
   useEffect(() => {
-    apiFetch<{ user: SessionUser }>("/auth/me").then((data) => data && setSessionUser(data.user));
-
     apiFetch<{ settings: WidgetSettings }>("/workspaces/widget-settings").then((data) => {
       if (!data) return;
       setAssistantName(data.settings.assistantName ?? "");
@@ -311,319 +314,297 @@ export default function WidgetPage() {
   // status, the site list, and current appearance settings, just not
   // the actions that change any of them (rotate/remove/add a site, save
   // appearance). Matches this page's every management route exactly.
-  const canManageWidget = sessionUser ? MANAGE_WIDGET_ROLES.includes(sessionUser.role) : false;
+  const canManageWidget = MANAGE_WIDGET_ROLES.includes(sessionUser.role);
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10">
-      <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Chat Widget</h1>
-        <Link href="/" className="text-sm text-slate-500 underline">
-          Back
-        </Link>
-      </div>
+    <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10">
+      <h1 className="text-xl font-semibold text-slate-900">Chat Widget</h1>
 
-      <section className="mb-10">
-        <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Install</h2>
+      <Card>
+        <CardHeader title="Install" />
+        <CardBody className="flex flex-col gap-3">
+          {installError && <InlineError message={installError} />}
 
-        {installError && <p className="mb-3 text-sm text-red-600">{installError}</p>}
+          {installBusy && !revealedKey && <p className="text-sm text-slate-500">Setting up your install code...</p>}
 
-        {installBusy && !revealedKey && <p className="text-sm text-slate-500">Setting up your install code...</p>}
-
-        {/* Gated on revealedKeyId matching the current primary's id, not
-            just "is revealedKey set" - if the primary is later rotated
-            again or removed, this box must stop showing this stale raw
-            value rather than keep displaying a code that's no longer the
-            active credential. */}
-        {revealedKey && revealedKeyId === primary?.id && (
-          <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
-            <p className="mb-1 font-medium text-amber-800">
-              Add this to your site to turn your assistant on. This code identifies your widget - it&apos;s fine for
-              it to live in your site&apos;s public source, it isn&apos;t a password.
-            </p>
-            <div className="flex items-start gap-2">
-              <pre className="flex-1 overflow-x-auto rounded bg-white p-2 text-xs">{embedSnippet(revealedKey)}</pre>
-              <div className="flex shrink-0 flex-col items-stretch gap-1">
-                <button
-                  onClick={() => copyToClipboard(embedSnippet(revealedKey))}
-                  className="rounded-md border border-amber-300 px-2 py-1 text-xs"
-                >
-                  Copy install snippet
-                </button>
-                <button
-                  onClick={() => copyToClipboard(revealedKey)}
-                  title="Copies just the bare key, for developer/testing use (e.g. the widget dev harness) - not what you'd put on a real site."
-                  className="px-2 py-0.5 text-right text-xs text-amber-800 underline"
-                >
-                  Copy key
-                </button>
+          {/* Gated on revealedKeyId matching the current primary's id, not
+              just "is revealedKey set" - if the primary is later rotated
+              again or removed, this box must stop showing this stale raw
+              value rather than keep displaying a code that's no longer the
+              active credential. */}
+          {revealedKey && revealedKeyId === primary?.id && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+              <p className="mb-1 font-medium text-amber-800">
+                Add this to your site to turn your assistant on. This code identifies your widget - it&apos;s fine
+                for it to live in your site&apos;s public source, it isn&apos;t a password.
+              </p>
+              <div className="flex items-start gap-2">
+                <pre className="flex-1 overflow-x-auto rounded bg-white p-2 text-xs">{embedSnippet(revealedKey)}</pre>
+                <div className="flex shrink-0 flex-col items-stretch gap-1">
+                  <button
+                    onClick={() => copyToClipboard(embedSnippet(revealedKey))}
+                    className="rounded-md border border-amber-300 px-2 py-1 text-xs"
+                  >
+                    Copy install snippet
+                  </button>
+                  <button
+                    onClick={() => copyToClipboard(revealedKey)}
+                    title="Copies just the bare key, for developer/testing use (e.g. the widget dev harness) - not what you'd put on a real site."
+                    className="px-2 py-0.5 text-right text-xs text-amber-800 underline"
+                  >
+                    Copy key
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {primary && !installBusy && (
-          <div className="rounded-md border border-slate-200 p-3 text-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-medium text-emerald-700">✓ Installed</div>
-                <div className="text-slate-500">
-                  Last customer interaction: {formatRelativeTime(primary.lastUsedAt)}
+          {primary && !installBusy && (
+            <div className="rounded-md border border-slate-200 p-3 text-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Badge tone="success">✓ Installed</Badge>
+                  <div className="mt-1 text-slate-500">Last customer interaction: {formatRelativeTime(primary.lastUsedAt)}</div>
                 </div>
+                {!revealedKey && canManageWidget && (
+                  <Button size="sm" variant="outline" onClick={() => handleGetNewCode(primary.id)}>
+                    Get a new install code
+                  </Button>
+                )}
               </div>
               {!revealedKey && canManageWidget && (
-                <button
-                  onClick={() => handleGetNewCode(primary.id)}
-                  className="shrink-0 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium"
-                >
-                  Get a new install code
-                </button>
+                <p className="mt-2 text-xs text-slate-500">
+                  This replaces your current code for this same install - it doesn&apos;t add a second one. The old
+                  code stops working the moment you do this, so update your site with the new one right away.
+                </p>
               )}
             </div>
-            {!revealedKey && canManageWidget && (
-              <p className="mt-2 text-xs text-slate-500">
-                This replaces your current code for this same install - it doesn&apos;t add a second one. The old
-                code stops working the moment you do this, so update your site with the new one right away.
-              </p>
-            )}
-          </div>
-        )}
+          )}
 
-        {/* Not the same as "loading" (apiKeys === null, handled above by
-            returning null): this is a workspace that has explicitly
-            removed its only install and hasn't recreated one - the empty
-            apiKeys array here must NOT silently auto-provision a
-            replacement (that's exactly the bug this state exists to
-            avoid; see hasEverProvisioned/refresh()'s mount-effect check). */}
-        {!primary && !installBusy && (
-          <div className="rounded-md border border-slate-200 p-3 text-sm">
-            <div className="font-medium text-slate-700">Not installed</div>
-            <div className="text-slate-500">No active install code for this workspace right now.</div>
-            {canManageWidget && (
-              <button
-                onClick={handleCreateDefaultInstall}
-                className="mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white"
-              >
-                Create an install code
-              </button>
-            )}
-          </div>
-        )}
-      </section>
+          {/* Not the same as "loading" (apiKeys === null, handled above by
+              returning null): this is a workspace that has explicitly
+              removed its only install and hasn't recreated one - the empty
+              apiKeys array here must NOT silently auto-provision a
+              replacement (that's exactly the bug this state exists to
+              avoid; see hasEverProvisioned/refresh()'s mount-effect check). */}
+          {!primary && !installBusy && (
+            <div className="rounded-md border border-slate-200 p-3 text-sm">
+              <div className="font-medium text-slate-700">Not installed</div>
+              <div className="text-slate-500">No active install code for this workspace right now.</div>
+              {canManageWidget && (
+                <Button size="sm" className="mt-2" onClick={handleCreateDefaultInstall}>
+                  Create an install code
+                </Button>
+              )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
 
-      <section className="mb-10">
-        <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Appearance</h2>
+      <Card>
+        <CardHeader title="Appearance" />
+        <CardBody>
+          {!appearanceLoaded && <p className="text-sm text-slate-500">Loading...</p>}
 
-        {!appearanceLoaded && <p className="text-sm text-slate-500">Loading...</p>}
-
-        {appearanceLoaded && (
-          <form onSubmit={handleSaveAppearance} className="flex flex-col gap-3 rounded-md border border-slate-200 p-3">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Assistant name</span>
-              <input
-                value={assistantName}
-                onChange={(event) => setAssistantName(event.target.value)}
-                placeholder="Defaults to your workspace name"
-                disabled={!canManageWidget}
-                maxLength={100}
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500 disabled:opacity-50"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Greeting message</span>
-              <textarea
-                value={greetingMessage}
-                onChange={(event) => setGreetingMessage(event.target.value)}
-                placeholder="Shown as the first message when a customer opens the chat"
-                disabled={!canManageWidget}
-                maxLength={500}
-                rows={2}
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500 disabled:opacity-50"
-              />
-            </label>
-
-            <div className="flex items-end gap-4">
+          {appearanceLoaded && (
+            <form onSubmit={handleSaveAppearance} className="flex flex-col gap-3">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-slate-700">Color</span>
-                <input
-                  type="color"
-                  value={primaryColor}
-                  onChange={(event) => setPrimaryColor(event.target.value)}
+                <span className="font-medium text-slate-700">Assistant name</span>
+                <Input
+                  value={assistantName}
+                  onChange={(event) => setAssistantName(event.target.value)}
+                  placeholder="Defaults to your workspace name"
                   disabled={!canManageWidget}
-                  className="h-9 w-14 cursor-pointer rounded border border-slate-300 disabled:opacity-50"
+                  maxLength={100}
                 />
               </label>
-              {canManageWidget && primaryColor !== BUILTIN_DEFAULT_COLOR && (
-                <button
-                  type="button"
-                  onClick={() => setPrimaryColor(BUILTIN_DEFAULT_COLOR)}
-                  className="pb-2 text-xs text-slate-500 underline"
-                >
-                  Reset to default
-                </button>
-              )}
 
               <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-slate-700">Position</span>
-                <select
-                  value={position}
-                  onChange={(event) => setPosition(event.target.value as "left" | "right")}
+                <span className="font-medium text-slate-700">Greeting message</span>
+                <Textarea
+                  value={greetingMessage}
+                  onChange={(event) => setGreetingMessage(event.target.value)}
+                  placeholder="Shown as the first message when a customer opens the chat"
                   disabled={!canManageWidget}
-                  className="rounded-md border border-slate-300 px-2 py-2 text-sm disabled:opacity-50"
-                >
-                  <option value="right">Bottom right</option>
-                  <option value="left">Bottom left</option>
-                </select>
+                  maxLength={500}
+                  rows={2}
+                />
               </label>
-            </div>
 
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="font-medium text-slate-700">Avatar URL</span>
-              <div className="flex items-center gap-2">
-                {avatarUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={avatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+              <div className="flex items-end gap-4">
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">Color</span>
+                  <input
+                    type="color"
+                    value={primaryColor}
+                    onChange={(event) => setPrimaryColor(event.target.value)}
+                    disabled={!canManageWidget}
+                    className="h-9 w-14 cursor-pointer rounded border border-slate-300 disabled:opacity-50"
+                  />
+                </label>
+                {canManageWidget && primaryColor !== BUILTIN_DEFAULT_COLOR && (
+                  <button
+                    type="button"
+                    onClick={() => setPrimaryColor(BUILTIN_DEFAULT_COLOR)}
+                    className="pb-2 text-xs text-slate-500 underline"
+                  >
+                    Reset to default
+                  </button>
                 )}
-                <input
-                  value={avatarUrl}
-                  onChange={(event) => setAvatarUrl(event.target.value)}
-                  placeholder="https://example.com/avatar.png (optional)"
-                  disabled={!canManageWidget}
-                  className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500 disabled:opacity-50"
-                />
+
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">Position</span>
+                  <Select
+                    value={position}
+                    onChange={(event) => setPosition(event.target.value as "left" | "right")}
+                    disabled={!canManageWidget}
+                  >
+                    <option value="right">Bottom right</option>
+                    <option value="left">Bottom left</option>
+                  </Select>
+                </label>
               </div>
-              <span className="text-xs text-slate-500">
-                Must be a link to an image that&apos;s already publicly reachable online, not a file on your
-                computer - uploading an image directly isn&apos;t supported yet.
-              </span>
-            </label>
 
-            {appearanceError && <p className="text-sm text-red-600">{appearanceError}</p>}
-            {appearanceSaved && <p className="text-sm text-emerald-700">Saved.</p>}
-
-            {canManageWidget && (
-              <button
-                type="submit"
-                disabled={appearanceSaving}
-                className="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {appearanceSaving ? "Saving..." : "Save"}
-              </button>
-            )}
-          </form>
-        )}
-      </section>
-
-      <details className="rounded-md border border-slate-200">
-        <summary className="cursor-pointer p-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">
-          Advanced
-        </summary>
-        <div className="border-t border-slate-200 p-3">
-          {advancedError && <p className="mb-3 text-sm text-red-600">{advancedError}</p>}
-
-          <ul className="mb-4 divide-y divide-slate-200 rounded-md border border-slate-200">
-            {apiKeys.length === 0 && <li className="p-3 text-sm text-slate-500">No sites yet.</li>}
-            {apiKeys.map((key) => (
-              <li key={key.id} className="flex flex-col gap-2 p-3 text-sm">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <div>
-                      {key.name} <code className="text-slate-500">{key.keyPrefix}...</code>
-                    </div>
-                    <div className="text-slate-500">
-                      {key.allowedOrigins && key.allowedOrigins.length > 0
-                        ? `restricted to ${key.allowedOrigins.join(", ")}`
-                        : "not restricted to any domain"}
-                    </div>
-                  </div>
-                  {canManageWidget && (
-                    <div className="flex shrink-0 gap-3">
-                      <button
-                        onClick={() => handleGetNewCode(key.id)}
-                        disabled={advancedBusy === key.id}
-                        title="Replaces this site's code - the old one stops working immediately."
-                        className="text-slate-600 underline disabled:opacity-50"
-                      >
-                        Rotate
-                      </button>
-                      <button
-                        onClick={() => handleRevoke(key.id)}
-                        disabled={advancedBusy === key.id}
-                        className="text-red-600 underline disabled:opacity-50"
-                      >
-                        Remove
-                      </button>
-                    </div>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">Avatar URL</span>
+                <div className="flex items-center gap-2">
+                  {avatarUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={avatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
                   )}
+                  <Input
+                    value={avatarUrl}
+                    onChange={(event) => setAvatarUrl(event.target.value)}
+                    placeholder="https://example.com/avatar.png (optional)"
+                    disabled={!canManageWidget}
+                    className="flex-1"
+                  />
                 </div>
-                {/* A secondary site's own reveal, scoped to its row - never
-                    the top Install box, so it can't be mistaken for a
-                    replacement of the primary install's code. */}
-                {revealedSiteKey?.id === key.id && (
-                  <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
-                    <p className="mb-1 font-medium text-amber-800">
-                      Code for &ldquo;{key.name}&rdquo; - add this to that site. It&apos;s a separate credential from
-                      your main install; it doesn&apos;t replace it.
-                    </p>
-                    <div className="flex items-start gap-2">
-                      <pre className="flex-1 overflow-x-auto rounded bg-white p-2 text-xs">
-                        {embedSnippet(revealedSiteKey.rawKey)}
-                      </pre>
-                      <div className="flex shrink-0 flex-col items-stretch gap-1">
-                        <button
-                          onClick={() => copyToClipboard(embedSnippet(revealedSiteKey.rawKey))}
-                          className="rounded-md border border-amber-300 px-2 py-1 text-xs"
-                        >
-                          Copy install snippet
-                        </button>
-                        <button
-                          onClick={() => copyToClipboard(revealedSiteKey.rawKey)}
-                          title="Copies just the bare key, for developer/testing use - not what you'd put on a real site."
-                          className="px-2 py-0.5 text-right text-xs text-amber-800 underline"
-                        >
-                          Copy key
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+                <span className="text-xs text-slate-500">
+                  Must be a link to an image that&apos;s already publicly reachable online, not a file on your
+                  computer - uploading an image directly isn&apos;t supported yet.
+                </span>
+              </label>
 
-          {canManageWidget && (
-            <form onSubmit={handleAddSite} className="flex flex-col gap-2">
-              <p className="text-xs text-slate-500">
-                A site is a separate domain that gets its own code and can be restricted to its own origin - it still
-                shares this same assistant, knowledge base, and Appearance settings. This doesn&apos;t rotate or
-                replace your existing codes.
-              </p>
-              <div className="flex gap-2">
-                <input
-                  value={newSiteName}
-                  onChange={(event) => setNewSiteName(event.target.value)}
-                  placeholder="Site name (e.g. Blog)"
-                  required
-                  className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                />
-                <button type="submit" className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white">
-                  Add another site
-                </button>
-              </div>
-              <input
-                value={newSiteDomains}
-                onChange={(event) => setNewSiteDomains(event.target.value)}
-                placeholder="Restrict to domains, comma-separated (optional)"
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-              />
-              <p className="text-xs text-slate-500">
-                Enter the exact hostname your site uses - www.example.com and example.com are treated as different
-                domains, so include both if your site answers to either.
-              </p>
+              {appearanceError && <InlineError message={appearanceError} />}
+              {appearanceSaved && <p className="text-sm text-emerald-700">Saved.</p>}
+
+              {canManageWidget && (
+                <Button type="submit" disabled={appearanceSaving} className="self-start">
+                  {appearanceSaving ? "Saving..." : "Save"}
+                </Button>
+              )}
             </form>
           )}
-        </div>
-      </details>
-    </main>
+        </CardBody>
+      </Card>
+
+      <Accordion title="Advanced">
+        {advancedError && (
+          <div className="mb-3">
+            <InlineError message={advancedError} />
+          </div>
+        )}
+
+        <ul className="mb-4 divide-y divide-slate-100 rounded-md border border-slate-200">
+          {apiKeys.length === 0 && <li className="p-3 text-sm text-slate-500">No sites yet.</li>}
+          {apiKeys.map((key) => (
+            <li key={key.id} className="flex flex-col gap-2 p-3 text-sm">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-slate-900">
+                    {key.name} <code className="text-slate-500">{key.keyPrefix}...</code>
+                  </div>
+                  <div className="text-slate-500">
+                    {key.allowedOrigins && key.allowedOrigins.length > 0
+                      ? `restricted to ${key.allowedOrigins.join(", ")}`
+                      : "not restricted to any domain"}
+                  </div>
+                </div>
+                {canManageWidget && (
+                  <div className="flex shrink-0 gap-3">
+                    <button
+                      onClick={() => handleGetNewCode(key.id)}
+                      disabled={advancedBusy === key.id}
+                      title="Replaces this site's code - the old one stops working immediately."
+                      className="text-slate-600 hover:underline disabled:opacity-50"
+                    >
+                      Rotate
+                    </button>
+                    <button
+                      onClick={() => handleRevoke(key.id)}
+                      disabled={advancedBusy === key.id}
+                      className="text-red-600 hover:underline disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+              {/* A secondary site's own reveal, scoped to its row - never
+                  the top Install box, so it can't be mistaken for a
+                  replacement of the primary install's code. */}
+              {revealedSiteKey?.id === key.id && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+                  <p className="mb-1 font-medium text-amber-800">
+                    Code for &ldquo;{key.name}&rdquo; - add this to that site. It&apos;s a separate credential from
+                    your main install; it doesn&apos;t replace it.
+                  </p>
+                  <div className="flex items-start gap-2">
+                    <pre className="flex-1 overflow-x-auto rounded bg-white p-2 text-xs">
+                      {embedSnippet(revealedSiteKey.rawKey)}
+                    </pre>
+                    <div className="flex shrink-0 flex-col items-stretch gap-1">
+                      <button
+                        onClick={() => copyToClipboard(embedSnippet(revealedSiteKey.rawKey))}
+                        className="rounded-md border border-amber-300 px-2 py-1 text-xs"
+                      >
+                        Copy install snippet
+                      </button>
+                      <button
+                        onClick={() => copyToClipboard(revealedSiteKey.rawKey)}
+                        title="Copies just the bare key, for developer/testing use - not what you'd put on a real site."
+                        className="px-2 py-0.5 text-right text-xs text-amber-800 underline"
+                      >
+                        Copy key
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {canManageWidget && (
+          <form onSubmit={handleAddSite} className="flex flex-col gap-2">
+            <p className="text-xs text-slate-500">
+              A site is a separate domain that gets its own code and can be restricted to its own origin - it still
+              shares this same assistant, knowledge base, and Appearance settings. This doesn&apos;t rotate or
+              replace your existing codes.
+            </p>
+            <div className="flex gap-2">
+              <Input
+                value={newSiteName}
+                onChange={(event) => setNewSiteName(event.target.value)}
+                placeholder="Site name (e.g. Blog)"
+                required
+                className="flex-1"
+              />
+              <Button type="submit">Add another site</Button>
+            </div>
+            <Input
+              value={newSiteDomains}
+              onChange={(event) => setNewSiteDomains(event.target.value)}
+              placeholder="Restrict to domains, comma-separated (optional)"
+            />
+            <p className="text-xs text-slate-500">
+              Enter the exact hostname your site uses - www.example.com and example.com are treated as different
+              domains, so include both if your site answers to either.
+            </p>
+          </form>
+        )}
+      </Accordion>
+    </div>
   );
 }

@@ -1,11 +1,18 @@
 "use client";
 
-import type { SessionUser } from "@csa/shared";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { ApiError, apiFetch } from "../../../lib/api";
-import { AgentConsoleConnection, type WireMessage } from "../../../lib/agent-console-ws-client";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { InlineError } from "@/components/ui/error-state";
+import { Input, Select, Textarea } from "@/components/ui/field";
+import { PageSkeleton } from "@/components/ui/skeleton";
+import { useSession } from "@/lib/session-context";
+import { ApiError, apiFetch } from "@/lib/api";
+import { AgentConsoleConnection, type WireMessage } from "@/lib/agent-console-ws-client";
 
 interface ConversationDetail {
   id: string;
@@ -60,8 +67,8 @@ export default function ConversationDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const conversationId = params.id;
+  const { user: sessionUser } = useSession();
 
-  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const [conversation, setConversation] = useState<ConversationDetail | null>(null);
   const [messages, setMessages] = useState<WireMessage[]>([]);
   const [notes, setNotes] = useState<ConversationNote[]>([]);
@@ -78,6 +85,7 @@ export default function ConversationDetailPage() {
   const [contactEmail, setContactEmail] = useState("");
   const [contactBusy, setContactBusy] = useState(false);
   const [contactError, setContactError] = useState<string | null>(null);
+  const [reassignConfirmOpen, setReassignConfirmOpen] = useState(false);
   const connectionRef = useRef<AgentConsoleConnection | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -99,9 +107,6 @@ export default function ConversationDetailPage() {
   }
 
   useEffect(() => {
-    apiFetch<{ user: SessionUser }>("/auth/me")
-      .then((data) => setSessionUser(data?.user ?? null))
-      .catch(() => router.push("/login"));
     loadDetail().catch(() => router.push("/login"));
     apiFetch<{ integrations: { provider: string; status: string }[] }>("/integrations")
       .then((data) => setHubspotConnected(data?.integrations.some((i) => i.provider === "hubspot" && i.status === "connected") ?? false))
@@ -148,19 +153,27 @@ export default function ConversationDetailPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
 
-  async function handleClaim() {
+  function handleClaim() {
     if (!conversation) {
       return;
     }
-    const isReassign = conversation.assignedUserId !== null && conversation.assignedUserId !== sessionUser?.userId;
+    const isReassign = conversation.assignedUserId !== null && conversation.assignedUserId !== sessionUser.userId;
     if (isReassign) {
-      const confirmed = window.confirm(`This conversation is assigned to ${conversation.assignedUserName}. Reassign it to you?`);
-      if (!confirmed) {
-        return;
-      }
+      setReassignConfirmOpen(true);
+      return;
     }
-    await apiFetch(`/conversations/${conversationId}/claim`, { method: "POST" });
-    await loadDetail();
+    void performClaim();
+  }
+
+  async function performClaim() {
+    setBusy(true);
+    try {
+      await apiFetch(`/conversations/${conversationId}/claim`, { method: "POST" });
+      await loadDetail();
+    } finally {
+      setBusy(false);
+      setReassignConfirmOpen(false);
+    }
   }
 
   async function handleSend(event: FormEvent) {
@@ -257,34 +270,34 @@ export default function ConversationDetailPage() {
     await loadDetail();
   }
 
-  if (!conversation || !sessionUser) {
-    return null;
+  if (!conversation) {
+    return <PageSkeleton />;
   }
 
   const isMine = conversation.assignedUserId === sessionUser.userId;
   const claimLabel = !conversation.assignedUserId ? "Claim" : isMine ? null : "Reassign to me";
 
   return (
-    <main className="mx-auto flex max-w-5xl gap-6 px-4 py-10">
-      <div className="flex-1">
-        <div className="mb-4 flex items-center justify-between">
+    <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10 lg:flex-row">
+      <div className="min-w-0 flex-1">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <Link href="/conversations" className="text-sm text-slate-500 underline">
-              Back to queue
+            <Link href="/conversations" className="text-sm text-slate-500 hover:text-slate-700 hover:underline">
+              ← Back to queue
             </Link>
-            <h1 className="mt-1 text-lg font-semibold">Conversation {conversation.id.slice(0, 8)}</h1>
+            <h1 className="mt-1 text-lg font-semibold text-slate-900">Conversation {conversation.id.slice(0, 8)}</h1>
           </div>
           <div className="flex items-center gap-2">
             {claimLabel && (
-              <button onClick={handleClaim} className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white">
+              <Button size="sm" onClick={handleClaim} disabled={busy}>
                 {claimLabel}
-              </button>
+              </Button>
             )}
             {isMine && <span className="text-sm text-slate-500">Assigned to you</span>}
-            <select
+            <Select
               value={conversation.status}
               onChange={(event) => handleStatusChange(event.target.value as "resolved" | "closed" | "open")}
-              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              className="py-1.5"
             >
               {!["open", "resolved", "closed"].includes(conversation.status) && (
                 <option value={conversation.status} disabled>
@@ -294,12 +307,23 @@ export default function ConversationDetailPage() {
               <option value="open">Open</option>
               <option value="resolved">Resolved</option>
               <option value="closed">Closed</option>
-            </select>
+            </Select>
           </div>
         </div>
 
+        <ConfirmDialog
+          open={reassignConfirmOpen}
+          onOpenChange={setReassignConfirmOpen}
+          title="Reassign this conversation?"
+          description={`It's currently assigned to ${conversation.assignedUserName}. Reassigning moves it to you.`}
+          confirmLabel="Reassign to me"
+          tone="default"
+          busy={busy}
+          onConfirm={performClaim}
+        />
+
         {escalations.length > 0 && (
-          <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm">
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm">
             <div className="mb-2 font-medium text-amber-800">
               Escalated {escalations.length > 1 ? `${escalations.length} times` : "once"} - every reason, oldest first
               (a human may need to address more than just the latest):
@@ -320,65 +344,62 @@ export default function ConversationDetailPage() {
           </div>
         )}
 
-        <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
-          {conversation.metadata.aiSummary ? (
-            <p>{conversation.metadata.aiSummary.text}</p>
-          ) : (
-            <p className="text-slate-500">No summary yet.</p>
-          )}
-          <button onClick={handleSummarize} disabled={busy} className="mt-2 text-xs text-slate-500 underline">
-            {conversation.metadata.aiSummary ? "Regenerate summary" : "Summarize"}
-          </button>
-        </div>
+        <Card className="mb-4">
+          <CardBody className="text-sm">
+            {conversation.metadata.aiSummary ? (
+              <p className="text-slate-700">{conversation.metadata.aiSummary.text}</p>
+            ) : (
+              <p className="text-slate-500">No summary yet.</p>
+            )}
+            <button onClick={handleSummarize} disabled={busy} className="mt-2 text-xs text-slate-500 underline disabled:opacity-50">
+              {conversation.metadata.aiSummary ? "Regenerate summary" : "Summarize"}
+            </button>
+          </CardBody>
+        </Card>
 
-        <div ref={scrollRef} className="mb-3 h-96 overflow-y-auto rounded-md border border-slate-200 p-3">
-          {!connected && <p className="text-sm text-slate-500">{reconnecting ? "Reconnecting..." : "Connecting..."}</p>}
-          {messages.map((message) => (
-            <div key={message.id} className="mb-2 text-sm">
-              <span className="font-medium">{message.senderName ?? message.senderType}: </span>
-              <span>{message.content}</span>
-            </div>
-          ))}
-          {typing && <div className="text-sm text-slate-400">...</div>}
-        </div>
+        <Card className="mb-3">
+          <div ref={scrollRef} className="h-96 overflow-y-auto p-3">
+            {!connected && <p className="text-sm text-slate-500">{reconnecting ? "Reconnecting..." : "Connecting..."}</p>}
+            {messages.map((message) => (
+              <div key={message.id} className="mb-2 text-sm">
+                <span className="font-medium text-slate-900">{message.senderName ?? message.senderType}: </span>
+                <span className="text-slate-700">{message.content}</span>
+              </div>
+            ))}
+            {typing && <div className="text-sm text-slate-400">...</div>}
+          </div>
+        </Card>
 
-        {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+        {error && <div className="mb-2"><InlineError message={error} /></div>}
 
         <form onSubmit={handleSend} className="flex gap-2">
-          <input
+          <Input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Type a reply..."
-            className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="flex-1"
           />
-          <button
-            type="button"
-            onClick={handleSuggest}
-            disabled={busy}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm disabled:opacity-50"
-          >
+          <Button type="button" variant="outline" onClick={handleSuggest} disabled={busy}>
             Suggest
-          </button>
-          <button
-            type="submit"
-            disabled={busy || !draft.trim()}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-          >
+          </Button>
+          <Button type="submit" disabled={busy || !draft.trim()}>
             Send
-          </button>
+          </Button>
         </form>
       </div>
 
-      <aside className="w-64 shrink-0">
+      <aside className="w-full shrink-0 lg:w-64">
         {escalationContact && (
           <div className="mb-4">
             <h2 className="mb-2 text-sm font-semibold tracking-wide text-slate-500 uppercase">Follow-up contact</h2>
-            <div className="rounded-md border border-slate-200 p-2 text-sm">
-              <div className="font-medium">{escalationContact.name}</div>
-              <div className="text-slate-500">
-                {escalationContact.contactMethod === "email" ? "Email" : "Phone"}: {escalationContact.contactValue}
-              </div>
-            </div>
+            <Card>
+              <CardBody className="text-sm">
+                <div className="font-medium text-slate-900">{escalationContact.name}</div>
+                <div className="text-slate-500">
+                  {escalationContact.contactMethod === "email" ? "Email" : "Phone"}: {escalationContact.contactValue}
+                </div>
+              </CardBody>
+            </Card>
           </div>
         )}
 
@@ -386,21 +407,17 @@ export default function ConversationDetailPage() {
           <div className="mb-4">
             <h2 className="mb-2 text-sm font-semibold tracking-wide text-slate-500 uppercase">CRM</h2>
             <form onSubmit={handleContactLookup} className="flex flex-col gap-2">
-              <input
+              <Input
                 value={contactEmail}
                 onChange={(event) => setContactEmail(event.target.value)}
                 placeholder="Customer email"
                 type="email"
-                className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                className="py-1.5"
               />
-              {contactError && <p className="text-xs text-red-600">{contactError}</p>}
-              <button
-                type="submit"
-                disabled={contactBusy || !contactEmail.trim()}
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
-              >
+              {contactError && <InlineError message={contactError} />}
+              <Button type="submit" variant="outline" size="sm" disabled={contactBusy || !contactEmail.trim()}>
                 {contactBusy ? "Looking up..." : "Check contact"}
-              </button>
+              </Button>
             </form>
           </div>
         )}
@@ -416,18 +433,18 @@ export default function ConversationDetailPage() {
           ))}
         </ul>
         <form onSubmit={handleAddNote} className="flex flex-col gap-2">
-          <textarea
+          <Textarea
             value={noteDraft}
             onChange={(event) => setNoteDraft(event.target.value)}
             placeholder="Add a note (not visible to the customer)..."
             rows={3}
-            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            className="py-1.5"
           />
-          <button type="submit" className="rounded-md border border-slate-300 px-3 py-1.5 text-sm">
+          <Button type="submit" variant="outline" size="sm">
             Add note
-          </button>
+          </Button>
         </form>
       </aside>
-    </main>
+    </div>
   );
 }

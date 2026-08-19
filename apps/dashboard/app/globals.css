@@ -1,1 +1,39 @@
 @import "tailwindcss";
+
+/*
+ * Design tokens for the dashboard. Both shells (Workspace + Platform)
+ * consume the same palette/radius/shadow scale — the only intentional
+ * divergence is --accent, which each shell layout overrides locally
+ * (see components/shell/*) so the two stay visually distinct without
+ * forking the design system itself.
+ *
+ * --brand stays slate-900 deliberately: it's already the widget's
+ * hardcoded default primaryColor fallback (apps/widget/src/widget.css),
+ * so reusing it here is what makes the dashboard and the customer-facing
+ * widget read as the same product instead of two unrelated ones.
+ */
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-brand: var(--color-slate-900);
+  --color-brand-hover: var(--color-slate-800);
+
+  --color-accent-workspace: var(--color-slate-900);
+  --color-accent-platform: var(--color-violet-600);
+
+  --color-success: var(--color-emerald-600);
+  --color-success-subtle: var(--color-emerald-100);
+  --color-danger: var(--color-red-600);
+  --color-danger-subtle: var(--color-red-100);
+  --color-warning: var(--color-amber-600);
+  --color-warning-subtle: var(--color-amber-100);
+  --color-info: var(--color-blue-600);
+  --color-info-subtle: var(--color-blue-100);
+
+  --shadow-elevation-sm: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 1px 0 rgb(15 23 42 / 0.03);
+  --shadow-elevation-md: 0 4px 12px -2px rgb(15 23 42 / 0.08), 0 2px 4px -2px rgb(15 23 42 / 0.04);
+}
+
+body {
+  font-family: var(--font-sans);
+}

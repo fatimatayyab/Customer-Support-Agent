@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
-import { ApiError, apiFetch } from "../../lib/api";
+import { Button } from "@/components/ui/button";
+import { InlineError } from "@/components/ui/error-state";
+import { Field, Input } from "@/components/ui/field";
+import { ApiError, apiFetch } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,19 +35,21 @@ export default function LoginPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4">
-      <h1 className="mb-6 text-xl font-semibold">Log in</h1>
+      <h1 className="mb-6 text-xl font-semibold text-slate-900">Log in</h1>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <Field label="Workspace" value={workspaceSlug} onChange={setWorkspaceSlug} placeholder="acme-support" />
-        <Field label="Email" type="email" value={email} onChange={setEmail} />
-        <Field label="Password" type="password" value={password} onChange={setPassword} />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
+        <Field label="Workspace">
+          <Input value={workspaceSlug} onChange={(event) => setWorkspaceSlug(event.target.value)} placeholder="acme-support" required />
+        </Field>
+        <Field label="Email">
+          <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+        </Field>
+        <Field label="Password">
+          <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+        </Field>
+        {error && <InlineError message={error} />}
+        <Button type="submit" disabled={submitting}>
           {submitting ? "Logging in..." : "Log in"}
-        </button>
+        </Button>
       </form>
       <p className="mt-4 text-sm text-slate-500">
         New here?{" "}
@@ -53,33 +58,5 @@ export default function LoginPage() {
         </Link>
       </p>
     </main>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  type = "text",
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-  placeholder?: string;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="font-medium text-slate-700">{label}</span>
-      <input
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        onChange={(event) => onChange(event.target.value)}
-        required
-        className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-      />
-    </label>
   );
 }

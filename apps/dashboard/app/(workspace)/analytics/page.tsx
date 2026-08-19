@@ -1,9 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { apiFetch, ApiError } from "../../lib/api";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { InlineError } from "@/components/ui/error-state";
+import { apiFetch, ApiError } from "@/lib/api";
 
 interface VolumeByDay {
   date: string;
@@ -121,21 +122,16 @@ export default function AnalyticsPage() {
   }, [days, router]);
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-10">
-      <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Analytics</h1>
-        <Link href="/" className="text-sm text-slate-500 underline">
-          Back
-        </Link>
-      </div>
+    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
+      <h1 className="mb-6 text-xl font-semibold text-slate-900">Analytics</h1>
 
       <div className="mb-6 flex gap-2">
         {RANGE_OPTIONS.map((option) => (
           <button
             key={option}
             onClick={() => setDays(option)}
-            className={`rounded-md border px-3 py-1.5 text-sm ${
-              days === option ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 text-slate-600"
+            className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+              days === option ? "border-brand bg-brand text-white" : "border-slate-300 text-slate-600 hover:bg-slate-50"
             }`}
           >
             Last {option} days
@@ -143,12 +139,12 @@ export default function AnalyticsPage() {
         ))}
       </div>
 
-      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+      {error && <InlineError message={error} />}
 
       {loading && !overview && !error && <p className="text-sm text-slate-500">Loading...</p>}
 
       {overview && (
-        <div className="flex flex-col gap-10">
+        <div className="flex flex-col gap-6">
           <section className="grid grid-cols-2 gap-4 sm:grid-cols-5">
             <StatTile label="Conversations" value={String(overview.totalConversations)} />
             <StatTile label="Resolution rate" value={formatPercent(overview.resolutionRate)} />
@@ -160,108 +156,120 @@ export default function AnalyticsPage() {
             />
           </section>
 
-          <section>
-            <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Conversation volume</h2>
-            {overview.volumeByDay.length === 0 ? (
-              <p className="text-sm text-slate-500">No conversations in this range.</p>
-            ) : (
-              <BarList items={overview.volumeByDay.map((row) => ({ label: row.date, value: row.count }))} />
-            )}
-          </section>
+          <Card>
+            <CardHeader title="Conversation volume" />
+            <CardBody>
+              {overview.volumeByDay.length === 0 ? (
+                <p className="text-sm text-slate-500">No conversations in this range.</p>
+              ) : (
+                <BarList items={overview.volumeByDay.map((row) => ({ label: row.date, value: row.count }))} />
+              )}
+            </CardBody>
+          </Card>
 
-          <section>
-            <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Conversations by status</h2>
-            {overview.statusBreakdown.length === 0 ? (
-              <p className="text-sm text-slate-500">No conversations in this range.</p>
-            ) : (
-              <BarList
-                items={overview.statusBreakdown.map((row) => ({
-                  label: STATUS_LABELS[row.status] ?? row.status,
-                  value: row.count,
-                }))}
-              />
-            )}
-          </section>
+          <Card>
+            <CardHeader title="Conversations by status" />
+            <CardBody>
+              {overview.statusBreakdown.length === 0 ? (
+                <p className="text-sm text-slate-500">No conversations in this range.</p>
+              ) : (
+                <BarList
+                  items={overview.statusBreakdown.map((row) => ({
+                    label: STATUS_LABELS[row.status] ?? row.status,
+                    value: row.count,
+                  }))}
+                />
+              )}
+            </CardBody>
+          </Card>
 
-          <section>
-            <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Escalation reasons</h2>
-            {overview.escalationReasonBreakdown.length === 0 ? (
-              <p className="text-sm text-slate-500">No escalations in this range.</p>
-            ) : (
-              <BarList
-                items={overview.escalationReasonBreakdown.map((row) => ({
-                  label: ESCALATION_REASON_LABELS[row.reason] ?? row.reason,
-                  value: row.count,
-                }))}
-              />
-            )}
-          </section>
+          <Card>
+            <CardHeader title="Escalation reasons" />
+            <CardBody>
+              {overview.escalationReasonBreakdown.length === 0 ? (
+                <p className="text-sm text-slate-500">No escalations in this range.</p>
+              ) : (
+                <BarList
+                  items={overview.escalationReasonBreakdown.map((row) => ({
+                    label: ESCALATION_REASON_LABELS[row.reason] ?? row.reason,
+                    value: row.count,
+                  }))}
+                />
+              )}
+            </CardBody>
+          </Card>
 
-          <section>
-            <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Customer satisfaction</h2>
-            {overview.totalRatings === 0 ? (
-              <p className="text-sm text-slate-500">No ratings in this range.</p>
-            ) : (
-              <BarList
-                items={overview.csatBreakdown.map((row) => ({
-                  label: CSAT_LABELS[row.rating] ?? row.rating,
-                  value: row.count,
-                }))}
-              />
-            )}
-          </section>
+          <Card>
+            <CardHeader title="Customer satisfaction" />
+            <CardBody>
+              {overview.totalRatings === 0 ? (
+                <p className="text-sm text-slate-500">No ratings in this range.</p>
+              ) : (
+                <BarList
+                  items={overview.csatBreakdown.map((row) => ({
+                    label: CSAT_LABELS[row.rating] ?? row.rating,
+                    value: row.count,
+                  }))}
+                />
+              )}
+            </CardBody>
+          </Card>
 
-          <section>
-            <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">AI performance</h2>
-            <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
-              <StatTile label="AI replies" value={String(overview.aiStats.totalAiMessages)} />
-              <StatTile label="Input tokens" value={overview.aiStats.totalInputTokens.toLocaleString()} />
-              <StatTile label="Output tokens" value={overview.aiStats.totalOutputTokens.toLocaleString()} />
-            </div>
-            {overview.aiStats.totalAiMessages === 0 ? (
-              <p className="text-sm text-slate-500">No AI replies in this range.</p>
-            ) : (
-              <div className="flex flex-col gap-4">
-                <div>
-                  <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">By provider</h3>
-                  <StatsTable rows={overview.aiStats.byProvider.map((row) => ({ label: row.provider, ...row }))} />
-                </div>
-                <div>
-                  <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">By model</h3>
-                  <StatsTable rows={overview.aiStats.byModel.map((row) => ({ label: row.model, ...row }))} />
-                </div>
+          <Card>
+            <CardHeader title="AI performance" />
+            <CardBody className="flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                <StatTile label="AI replies" value={String(overview.aiStats.totalAiMessages)} />
+                <StatTile label="Input tokens" value={overview.aiStats.totalInputTokens.toLocaleString()} />
+                <StatTile label="Output tokens" value={overview.aiStats.totalOutputTokens.toLocaleString()} />
               </div>
-            )}
-          </section>
+              {overview.aiStats.totalAiMessages === 0 ? (
+                <p className="text-sm text-slate-500">No AI replies in this range.</p>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">By provider</h3>
+                    <StatsTable rows={overview.aiStats.byProvider.map((row) => ({ label: row.provider, ...row }))} />
+                  </div>
+                  <div>
+                    <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">By model</h3>
+                    <StatsTable rows={overview.aiStats.byModel.map((row) => ({ label: row.model, ...row }))} />
+                  </div>
+                </div>
+              )}
+            </CardBody>
+          </Card>
 
-          <section>
-            <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Most-cited knowledge sources</h2>
-            {overview.topCitedSources.length === 0 ? (
-              <p className="text-sm text-slate-500">No AI replies cited a knowledge source in this range.</p>
-            ) : (
-              <ul className="divide-y divide-slate-200 rounded-md border border-slate-200">
-                {overview.topCitedSources.map((source) => (
-                  <li key={source.knowledgeSourceId} className="flex items-center justify-between p-3 text-sm">
-                    <span>{source.title}</span>
-                    <span className="text-slate-500">
-                      {source.citationCount} citation{source.citationCount === 1 ? "" : "s"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          <Card>
+            <CardHeader title="Most-cited knowledge sources" />
+            <CardBody>
+              {overview.topCitedSources.length === 0 ? (
+                <p className="text-sm text-slate-500">No AI replies cited a knowledge source in this range.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 rounded-md border border-slate-200">
+                  {overview.topCitedSources.map((source) => (
+                    <li key={source.knowledgeSourceId} className="flex items-center justify-between p-3 text-sm">
+                      <span className="text-slate-700">{source.title}</span>
+                      <span className="text-slate-500">
+                        {source.citationCount} citation{source.citationCount === 1 ? "" : "s"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardBody>
+          </Card>
         </div>
       )}
-    </main>
+    </div>
   );
 }
 
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-slate-200 p-4">
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-elevation-sm">
       <div className="text-xs font-medium tracking-wide text-slate-500 uppercase">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
+      <div className="mt-1 text-2xl font-semibold text-slate-900">{value}</div>
     </div>
   );
 }
@@ -277,7 +285,7 @@ function BarList({ items }: { items: { label: string; value: number }[] }) {
         <li key={item.label} className="flex items-center gap-3 text-sm">
           <span className="w-36 shrink-0 truncate text-slate-500">{item.label}</span>
           <div className="h-3 flex-1 rounded-full bg-slate-100">
-            <div className="h-3 rounded-full bg-slate-900" style={{ width: `${(item.value / max) * 100}%` }} />
+            <div className="h-3 rounded-full bg-brand" style={{ width: `${(item.value / max) * 100}%` }} />
           </div>
           <span className="w-8 shrink-0 text-right text-slate-500">{item.value}</span>
         </li>
@@ -288,10 +296,10 @@ function BarList({ items }: { items: { label: string; value: number }[] }) {
 
 function StatsTable({ rows }: { rows: { label: string; count: number; avgConfidence: number | null }[] }) {
   return (
-    <ul className="divide-y divide-slate-200 rounded-md border border-slate-200">
+    <ul className="divide-y divide-slate-100 rounded-md border border-slate-200">
       {rows.map((row) => (
         <li key={row.label} className="flex items-center justify-between p-3 text-sm">
-          <span>{row.label}</span>
+          <span className="text-slate-700">{row.label}</span>
           <span className="text-slate-500">
             {row.count} repl{row.count === 1 ? "y" : "ies"}
             {row.avgConfidence !== null && ` · avg confidence ${row.avgConfidence.toFixed(2)}`}

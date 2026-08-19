@@ -1,9 +1,17 @@
 "use client";
 
-import Link from "next/link";
+import { BookOpen } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { apiFetch, ApiError } from "../../lib/api";
+import { Badge } from "@/components/ui/badge";
+import type { BadgeTone } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { InlineError } from "@/components/ui/error-state";
+import { Input, Textarea } from "@/components/ui/field";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { apiFetch, ApiError } from "@/lib/api";
 
 interface KnowledgeSource {
   id: string;
@@ -23,6 +31,13 @@ interface SearchResult {
 }
 
 const POLL_INTERVAL_MS = 2000;
+
+const STATUS_TONES: Record<KnowledgeSource["status"], BadgeTone> = {
+  pending: "neutral",
+  processing: "warning",
+  completed: "success",
+  failed: "danger",
+};
 
 export default function KnowledgePage() {
   const router = useRouter();
@@ -166,163 +181,129 @@ export default function KnowledgePage() {
   }
 
   if (!sources) {
-    return null;
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 sm:py-10">
+        <Skeleton className="mb-6 h-7 w-32" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
   }
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10">
-      <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Knowledge</h1>
-        <Link href="/" className="text-sm text-slate-500 underline">
-          Back
-        </Link>
-      </div>
+    <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10">
+      <h1 className="text-xl font-semibold text-slate-900">Knowledge</h1>
 
-      <section className="mb-10">
-        <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Sources</h2>
-        <ul className="mb-4 divide-y divide-slate-200 rounded-md border border-slate-200">
-          {sources.length === 0 && <li className="p-3 text-sm text-slate-500">No knowledge sources yet.</li>}
-          {sources.map((source) => (
-            <li key={source.id} className="flex items-center justify-between gap-4 p-3 text-sm">
-              <div>
-                <div className="font-medium">{source.title}</div>
-                <div className="text-slate-500">
-                  {source.type} · <StatusBadge status={source.status} />
-                  {source.status === "failed" && source.failureReason && (
-                    <span className="text-red-600"> - {source.failureReason}</span>
-                  )}
-                </div>
-                {source.sourceLocation && <div className="text-xs text-slate-400">{source.sourceLocation}</div>}
-              </div>
-              <button onClick={() => handleDelete(source.id)} className="shrink-0 text-red-600 underline">
-                Delete
-              </button>
-            </li>
-          ))}
-        </ul>
-
-        <form onSubmit={handleCreate} className="flex flex-col gap-2">
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="Title (e.g. Refund Policy)"
-            required
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-          />
-          <textarea
-            value={content}
-            onChange={(event) => setContent(event.target.value)}
-            placeholder="Paste the knowledge text here..."
-            required
-            rows={5}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-          />
-          <button
-            type="submit"
-            disabled={creating}
-            className="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {creating ? "Adding..." : "Add source"}
-          </button>
-        </form>
-
-        <h3 className="mt-6 mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">Upload a file</h3>
-        <form onSubmit={handleUpload} className="flex flex-col gap-2">
-          <input
-            value={uploadTitle}
-            onChange={(event) => setUploadTitle(event.target.value)}
-            placeholder="Title"
-            required
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".txt,.md,.pdf,.docx"
-            onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
-            required
-            className="text-sm"
-          />
-          <p className="text-xs text-slate-400">.txt, .md, .pdf, or .docx</p>
-          {uploadError && <p className="text-sm text-red-600">{uploadError}</p>}
-          <button
-            type="submit"
-            disabled={uploading}
-            className="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {uploading ? "Uploading..." : "Upload"}
-          </button>
-        </form>
-
-        <h3 className="mt-6 mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">Add website pages</h3>
-        <form onSubmit={handleAddWebsites} className="flex flex-col gap-2">
-          <textarea
-            value={websiteUrls}
-            onChange={(event) => setWebsiteUrls(event.target.value)}
-            placeholder={"https://example.com/help/refunds\nhttps://example.com/help/shipping"}
-            rows={3}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-          />
-          <p className="text-xs text-slate-400">One URL per line. Each page is fetched and added separately.</p>
-          {websiteError && <p className="text-sm text-red-600">{websiteError}</p>}
-          {websiteSkipped.length > 0 && (
-            <p className="text-sm text-amber-700">
-              Already in your knowledge base, skipped: {websiteSkipped.join(", ")}
-            </p>
+      <Card>
+        <CardHeader title="Sources" />
+        <CardBody className="flex flex-col gap-6">
+          {sources.length === 0 ? (
+            <EmptyState icon={BookOpen} title="No knowledge sources yet" description="Add text, upload a file, or pull in website pages below." />
+          ) : (
+            <ul className="divide-y divide-slate-100 rounded-md border border-slate-200">
+              {sources.map((source) => (
+                <li key={source.id} className="flex items-center justify-between gap-4 p-3 text-sm">
+                  <div>
+                    <div className="font-medium text-slate-900">{source.title}</div>
+                    <div className="mt-0.5 flex items-center gap-2 text-slate-500">
+                      <span>{source.type}</span>
+                      <Badge tone={STATUS_TONES[source.status]}>{source.status}</Badge>
+                      {source.status === "failed" && source.failureReason && (
+                        <span className="text-red-600">{source.failureReason}</span>
+                      )}
+                    </div>
+                    {source.sourceLocation && <div className="mt-0.5 text-xs text-slate-400">{source.sourceLocation}</div>}
+                  </div>
+                  <button onClick={() => handleDelete(source.id)} className="shrink-0 text-sm text-red-600 hover:underline">
+                    Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
-          <button
-            type="submit"
-            disabled={addingWebsites}
-            className="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {addingWebsites ? "Adding..." : "Add pages"}
-          </button>
-        </form>
-      </section>
 
-      <section>
-        <h2 className="mb-3 text-sm font-semibold tracking-wide text-slate-500 uppercase">Search</h2>
-        <form onSubmit={handleSearch} className="mb-4 flex gap-2">
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Ask a question..."
-            required
-            className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-          />
-          <button
-            type="submit"
-            disabled={searching}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {searching ? "Searching..." : "Search"}
-          </button>
-        </form>
+          <form onSubmit={handleCreate} className="flex flex-col gap-2">
+            <Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title (e.g. Refund Policy)" required />
+            <Textarea
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              placeholder="Paste the knowledge text here..."
+              required
+              rows={5}
+            />
+            <Button type="submit" disabled={creating} className="self-start">
+              {creating ? "Adding..." : "Add source"}
+            </Button>
+          </form>
 
-        {searchError && <p className="mb-4 text-sm text-red-600">{searchError}</p>}
+          <div className="flex flex-col gap-2 border-t border-slate-100 pt-6">
+            <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Upload a file</h3>
+            <form onSubmit={handleUpload} className="flex flex-col gap-2">
+              <Input value={uploadTitle} onChange={(event) => setUploadTitle(event.target.value)} placeholder="Title" required />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.md,.pdf,.docx"
+                onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+                required
+                className="text-sm"
+              />
+              <p className="text-xs text-slate-400">.txt, .md, .pdf, or .docx</p>
+              {uploadError && <InlineError message={uploadError} />}
+              <Button type="submit" disabled={uploading} className="self-start">
+                {uploading ? "Uploading..." : "Upload"}
+              </Button>
+            </form>
+          </div>
 
-        {results && (
-          <ul className="divide-y divide-slate-200 rounded-md border border-slate-200">
-            {results.length === 0 && <li className="p-3 text-sm text-slate-500">No matches.</li>}
-            {results.map((result) => (
-              <li key={result.id} className="p-3 text-sm">
-                <div className="mb-1 text-xs text-slate-500">similarity: {result.similarity.toFixed(3)}</div>
-                <div>{result.content}</div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </main>
+          <div className="flex flex-col gap-2 border-t border-slate-100 pt-6">
+            <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Add website pages</h3>
+            <form onSubmit={handleAddWebsites} className="flex flex-col gap-2">
+              <Textarea
+                value={websiteUrls}
+                onChange={(event) => setWebsiteUrls(event.target.value)}
+                placeholder={"https://example.com/help/refunds\nhttps://example.com/help/shipping"}
+                rows={3}
+              />
+              <p className="text-xs text-slate-400">One URL per line. Each page is fetched and added separately.</p>
+              {websiteError && <InlineError message={websiteError} />}
+              {websiteSkipped.length > 0 && (
+                <p className="text-sm text-amber-700">
+                  Already in your knowledge base, skipped: {websiteSkipped.join(", ")}
+                </p>
+              )}
+              <Button type="submit" disabled={addingWebsites} className="self-start">
+                {addingWebsites ? "Adding..." : "Add pages"}
+              </Button>
+            </form>
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Search" description="Test what your assistant would retrieve for a question." />
+        <CardBody className="flex flex-col gap-4">
+          <form onSubmit={handleSearch} className="flex gap-2">
+            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask a question..." required className="flex-1" />
+            <Button type="submit" disabled={searching}>
+              {searching ? "Searching..." : "Search"}
+            </Button>
+          </form>
+
+          {searchError && <InlineError message={searchError} />}
+
+          {results && (
+            <ul className="divide-y divide-slate-100 rounded-md border border-slate-200">
+              {results.length === 0 && <li className="p-3 text-sm text-slate-500">No matches.</li>}
+              {results.map((result) => (
+                <li key={result.id} className="p-3 text-sm">
+                  <div className="mb-1 text-xs text-slate-500">similarity: {result.similarity.toFixed(3)}</div>
+                  <div className="text-slate-700">{result.content}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardBody>
+      </Card>
+    </div>
   );
-}
-
-function StatusBadge({ status }: { status: KnowledgeSource["status"] }) {
-  const colors: Record<KnowledgeSource["status"], string> = {
-    pending: "text-slate-500",
-    processing: "text-amber-600",
-    completed: "text-green-600",
-    failed: "text-red-600",
-  };
-  return <span className={colors[status]}>{status}</span>;
 }

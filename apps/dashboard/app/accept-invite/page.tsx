@@ -2,7 +2,10 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, Suspense, useEffect, useState } from "react";
-import { apiFetch, ApiError } from "../../lib/api";
+import { Button } from "@/components/ui/button";
+import { InlineError } from "@/components/ui/error-state";
+import { Field, Input } from "@/components/ui/field";
+import { ApiError, apiFetch } from "@/lib/api";
 
 interface InvitationPreview {
   workspaceName: string;
@@ -57,7 +60,7 @@ function AcceptInviteForm() {
   if (previewError) {
     return (
       <main className="mx-auto max-w-sm px-4 py-20 text-center">
-        <p className="text-sm text-red-600">{previewError}</p>
+        <InlineError message={previewError} />
       </main>
     );
   }
@@ -68,36 +71,28 @@ function AcceptInviteForm() {
 
   return (
     <main className="mx-auto max-w-sm px-4 py-20">
-      <h1 className="mb-1 text-lg font-semibold">Join {preview.workspaceName}</h1>
+      <h1 className="mb-1 text-lg font-semibold text-slate-900">Join {preview.workspaceName}</h1>
       <p className="mb-6 text-sm text-slate-500">
         {preview.email} · {ROLE_LABELS[preview.role] ?? preview.role}
       </p>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-        <input
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Your name"
-          required
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-        />
-        <input
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="Choose a password"
-          type="password"
-          required
-          minLength={8}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-        />
-        {submitError && <p className="text-sm text-red-600">{submitError}</p>}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <Field label="Your name">
+          <Input value={name} onChange={(event) => setName(event.target.value)} required />
+        </Field>
+        <Field label="Password">
+          <Input
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            type="password"
+            required
+            minLength={8}
+          />
+        </Field>
+        {submitError && <InlineError message={submitError} />}
+        <Button type="submit" disabled={submitting}>
           {submitting ? "Joining..." : "Accept invitation"}
-        </button>
+        </Button>
       </form>
     </main>
   );
