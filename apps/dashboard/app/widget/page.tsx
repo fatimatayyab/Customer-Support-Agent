@@ -339,12 +339,21 @@ export default function WidgetPage() {
             </p>
             <div className="flex items-start gap-2">
               <pre className="flex-1 overflow-x-auto rounded bg-white p-2 text-xs">{embedSnippet(revealedKey)}</pre>
-              <button
-                onClick={() => copyToClipboard(embedSnippet(revealedKey))}
-                className="shrink-0 rounded-md border border-amber-300 px-2 py-1 text-xs"
-              >
-                Copy
-              </button>
+              <div className="flex shrink-0 flex-col items-stretch gap-1">
+                <button
+                  onClick={() => copyToClipboard(embedSnippet(revealedKey))}
+                  className="rounded-md border border-amber-300 px-2 py-1 text-xs"
+                >
+                  Copy install snippet
+                </button>
+                <button
+                  onClick={() => copyToClipboard(revealedKey)}
+                  title="Copies just the bare key, for developer/testing use (e.g. the widget dev harness) - not what you'd put on a real site."
+                  className="px-2 py-0.5 text-right text-xs text-amber-800 underline"
+                >
+                  Copy key
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -557,12 +566,21 @@ export default function WidgetPage() {
                       <pre className="flex-1 overflow-x-auto rounded bg-white p-2 text-xs">
                         {embedSnippet(revealedSiteKey.rawKey)}
                       </pre>
-                      <button
-                        onClick={() => copyToClipboard(embedSnippet(revealedSiteKey.rawKey))}
-                        className="shrink-0 rounded-md border border-amber-300 px-2 py-1 text-xs"
-                      >
-                        Copy
-                      </button>
+                      <div className="flex shrink-0 flex-col items-stretch gap-1">
+                        <button
+                          onClick={() => copyToClipboard(embedSnippet(revealedSiteKey.rawKey))}
+                          className="rounded-md border border-amber-300 px-2 py-1 text-xs"
+                        >
+                          Copy install snippet
+                        </button>
+                        <button
+                          onClick={() => copyToClipboard(revealedSiteKey.rawKey)}
+                          title="Copies just the bare key, for developer/testing use - not what you'd put on a real site."
+                          className="px-2 py-0.5 text-right text-xs text-amber-800 underline"
+                        >
+                          Copy key
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}

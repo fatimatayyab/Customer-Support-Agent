@@ -72,3 +72,18 @@ export function clearDevApiKey(): void {
     // See readStoredApiKey - storage can throw in a locked-down context.
   }
 }
+
+// csa_live_ + 64 lowercase hex chars (32 random bytes) - see
+// generateApiKey() in apps/api's api-key.ts. The dashboard's "Copy
+// install snippet" button (the one meant for a real customer's site)
+// copies the whole <script> block, not the bare key - a developer
+// testing locally naturally reaches for that same button and pastes the
+// result here, or hand-selects the key out of the snippet and picks up a
+// stray quote/comma. Matching the pattern ANYWHERE in the input, rather
+// than requiring the whole input to be exactly the key, means all of
+// those still resolve to the right token instead of failing outright.
+const API_KEY_PATTERN = /csa_live_[0-9a-f]{64}/;
+
+export function extractApiKey(input: string): string | null {
+  return input.match(API_KEY_PATTERN)?.[0] ?? null;
+}
