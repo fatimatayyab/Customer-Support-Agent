@@ -9,6 +9,14 @@ interface ChatPanelProps {
   greetingMessage: string | null;
   connected: boolean;
   reconnecting: boolean;
+  // True once conversation:initiated has come back (conversationId is
+  // set) - distinct from `connected`, which only reflects the WebSocket
+  // socket itself opening. There's a real gap between the two: the
+  // socket can be open for a moment before the server's initiate
+  // response (and any resumed history) actually arrives, during which
+  // the panel would otherwise show only the static greeting with no
+  // indication anything is still loading.
+  conversationInitiated: boolean;
   messages: WireMessage[];
   typing: boolean;
   canRate: boolean;
@@ -129,6 +137,7 @@ export function ChatPanel({
   greetingMessage,
   connected,
   reconnecting,
+  conversationInitiated,
   messages,
   typing,
   canRate,
@@ -184,7 +193,18 @@ export function ChatPanel({
       </header>
 
       <div class="panel-messages" ref={scrollRef}>
-        {!connected && <p class="panel-status">{reconnecting ? "Reconnecting..." : "Connecting..."}</p>}
+        {/* Mutually exclusive with the connected/reconnecting states below
+            it - this only ever shows in the brief window after the socket
+            opens but before conversation:initiated (with any resumed
+            history) has arrived. Once initiated, conversationInitiated
+            flips to true and this line disappears on its own, the same
+            way every other status line here already does - no separate
+            timeout/cleanup needed. */}
+        {!connected ? (
+          <p class="panel-status">{reconnecting ? "Reconnecting..." : "Connecting..."}</p>
+        ) : (
+          !conversationInitiated && <p class="panel-status">Loading conversation...</p>
+        )}
         {greetingMessage && <div class="message message-ai">{greetingMessage}</div>}
         {messages.map((message) => (
           <div key={message.id}>

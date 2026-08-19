@@ -190,6 +190,7 @@ export function Widget({ config }: { config: WidgetConfig }) {
         greetingMessage={settings.greetingMessage}
         connected={connected}
         reconnecting={reconnecting}
+        conversationInitiated={conversationId !== null}
         messages={messages}
         typing={typing}
         canRate={conversationId !== null}
