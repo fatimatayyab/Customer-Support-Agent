@@ -1,4 +1,4 @@
-import type { AiProvider, AiReplyResult, SummarizeResult } from "../modules/ai/ai-provider.js";
+import type { AiProvider, AiReplyResult, GenerateReplyInput, SummarizeResult } from "../modules/ai/ai-provider.js";
 
 /**
  * Throws loudly if used without being configured, rather than falling
@@ -12,6 +12,10 @@ import type { AiProvider, AiReplyResult, SummarizeResult } from "../modules/ai/a
 export class FakeAiProvider implements AiProvider {
   private replyResult: AiReplyResult | Error | undefined;
   private summarizeResult: SummarizeResult | Error | undefined;
+  // Captured on every call, not just the configured output - lets a test
+  // assert on what the orchestrator/AI Service actually sent (e.g.
+  // pageContext threading) without needing a second fake mechanism.
+  lastGenerateReplyInput: GenerateReplyInput | undefined;
 
   mockReply(overrides: Partial<AiReplyResult> = {}): this {
     this.replyResult = {
@@ -46,7 +50,8 @@ export class FakeAiProvider implements AiProvider {
     return this;
   }
 
-  async generateReply(): Promise<AiReplyResult> {
+  async generateReply(input: GenerateReplyInput): Promise<AiReplyResult> {
+    this.lastGenerateReplyInput = input;
     if (this.replyResult === undefined) {
       throw new Error(
         "FakeAiProvider.generateReply called without a configured response - call fake.mockReply(...) before using it in a test.",

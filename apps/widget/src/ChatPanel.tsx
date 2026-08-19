@@ -252,9 +252,9 @@ export function ChatPanel({
           value={draft}
           onInput={(event) => handleInput((event.target as HTMLInputElement).value)}
           placeholder="Type a message..."
-          disabled={!connected}
+          disabled={!connected || !conversationInitiated}
         />
-        <button type="submit" disabled={!connected || !draft.trim()}>
+        <button type="submit" disabled={!connected || !conversationInitiated || !draft.trim()}>
           Send
         </button>
       </form>

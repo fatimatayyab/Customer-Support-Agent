@@ -74,7 +74,14 @@ export async function buildApp(): Promise<FastifyInstance> {
       callback(null, corsOptionsFor(request));
     },
   });
-  app.register(websocket);
+  // maxPayload caps a single raw WS frame - without it, a client could
+  // send an arbitrarily large frame that costs memory/CPU to buffer and
+  // JSON.parse before Zod's own per-field limits (message content 4000
+  // chars, pageUrl 2048, pageTitle 300 - widget-ws.routes.ts) ever get a
+  // chance to reject it. 32KB comfortably covers the largest legitimate
+  // message:send payload with room for JSON overhead and multi-byte
+  // UTF-8 expansion.
+  app.register(websocket, { options: { maxPayload: 32 * 1024 } });
   // No auth, no CORS restriction (script tags aren't subject to CORS
   // anyway) - a widget loader script is meant to be publicly fetchable
   // by design, same as any real CDN-hosted widget. WIDGET_DIST_DIR only

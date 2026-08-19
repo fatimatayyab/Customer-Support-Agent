@@ -61,7 +61,7 @@ const JITTER_RATIO = 0.2;
 // steady state rather than giving up, with +/-20% jitter so a fleet of
 // widgets reconnecting after the same API restart doesn't hit it in
 // lockstep.
-function reconnectDelayMs(attempt: number): number {
+export function reconnectDelayMs(attempt: number): number {
   const base = Math.min(BASE_RECONNECT_DELAY_MS * 2 ** attempt, MAX_RECONNECT_DELAY_MS);
   const jitter = base * JITTER_RATIO * (Math.random() * 2 - 1);
   return Math.max(0, Math.round(base + jitter));

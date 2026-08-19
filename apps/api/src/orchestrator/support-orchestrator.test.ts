@@ -177,6 +177,86 @@ describe("handleCustomerMessage", () => {
     expect(messageContents(messages)).toContainEqual({ senderType: "customer", content: "Where's my order?" });
   });
 
+  it("stores pageUrl/pageTitle on the customer message's own metadata when the widget sends them", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    await handleCustomerMessage(
+      {
+        workspaceId: workspace.id,
+        conversationId: conversation.id,
+        content: "Where's my order?",
+        pageUrl: "https://example.com/orders",
+        pageTitle: "My Orders",
+      },
+      { jobRunner: new SynchronousJobRunner(), aiProvider: new FakeAiProvider() },
+    );
+
+    const messages = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      listMessages(scopedDb, workspace.id, conversation.id),
+    );
+    const customerMessage = messages.find((message) => message.senderType === "customer");
+    expect(customerMessage?.metadata).toMatchObject({
+      pageUrl: "https://example.com/orders",
+      pageTitle: "My Orders",
+    });
+  });
+
+  it("does not attach page-context metadata when the widget sends no pageUrl", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "Where's my order?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider: new FakeAiProvider() },
+    );
+
+    const messages = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      listMessages(scopedDb, workspace.id, conversation.id),
+    );
+    const customerMessage = messages.find((message) => message.senderType === "customer");
+    expect(customerMessage?.metadata ?? null).toBeNull();
+  });
+
+  it("passes pageContext through to the AI provider when the widget sends it", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const embeddingProvider = new FakeEmbeddingProvider();
+    await seedRelevantKnowledge(workspace.id, embeddingProvider);
+    const aiProvider = new FakeAiProvider().mockReply({ confidence: 0.95 });
+
+    await handleCustomerMessage(
+      {
+        workspaceId: workspace.id,
+        conversationId: conversation.id,
+        content: "Can I get a refund?",
+        pageUrl: "https://example.com/refund-policy",
+        pageTitle: "Refund Policy",
+      },
+      { jobRunner: new SynchronousJobRunner(), aiProvider, embeddingProvider },
+    );
+
+    expect(aiProvider.lastGenerateReplyInput?.pageContext).toEqual({
+      url: "https://example.com/refund-policy",
+      title: "Refund Policy",
+    });
+  });
+
+  it("passes no pageContext to the AI provider when the widget sends no pageUrl", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const embeddingProvider = new FakeEmbeddingProvider();
+    await seedRelevantKnowledge(workspace.id, embeddingProvider);
+    const aiProvider = new FakeAiProvider().mockReply({ confidence: 0.95 });
+
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "Can I get a refund?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider, embeddingProvider },
+    );
+
+    expect(aiProvider.lastGenerateReplyInput?.pageContext).toBeUndefined();
+  });
+
   it("never calls the AI once a human has claimed the conversation", async () => {
     const workspace = await createWorkspace();
     const agent = await createUser(workspace.id);
