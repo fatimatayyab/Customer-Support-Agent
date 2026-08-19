@@ -1,6 +1,9 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import cookie from "@fastify/cookie";
 import cors, { type FastifyCorsOptions } from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
+import staticFiles from "@fastify/static";
 import websocket from "@fastify/websocket";
 import fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { env } from "./config/env.js";
@@ -25,6 +28,15 @@ import { platformAuthRoutes } from "./modules/platform-auth/platform-auth.routes
 import { platformRoutes } from "./modules/platform/platform.routes.js";
 
 const WIDGET_ROUTE_PREFIX = "/widget";
+
+// The single built widget bundle (apps/widget's `pnpm build` output) -
+// served directly off this API rather than a separate CDN/static host,
+// since none exists yet (see docs/07's "Widget Production Hosting" gap).
+// Reusing the one public tunnel/domain this API already needs for
+// widget/AI traffic means a real external customer's embed only ever
+// depends on one host, not two. Revisit this the moment a real static
+// host is decided - this is a minimal stand-in, not the final answer.
+const WIDGET_DIST_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../widget/dist");
 
 // A single cors registration with a per-request delegate, rather than
 // registering the plugin twice: @fastify/cors installs one global
@@ -63,6 +75,11 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   });
   app.register(websocket);
+  // No auth, no CORS restriction (script tags aren't subject to CORS
+  // anyway) - a widget loader script is meant to be publicly fetchable
+  // by design, same as any real CDN-hosted widget. WIDGET_DIST_DIR only
+  // ever contains the one built widget.js, never source or secrets.
+  app.register(staticFiles, { root: WIDGET_DIST_DIR });
   // A generous, IP-keyed default across every route - the real
   // protection for cost-incurring/abuse-prone endpoints (auth,
   // knowledge ingestion, invitations, WS messages) is the tighter,

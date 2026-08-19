@@ -7,6 +7,14 @@ import { type FormEvent, useEffect, useState } from "react";
 import { ApiError, apiFetch } from "../../lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
+// The URL a REAL embedded widget (someone else's actual website) uses -
+// distinct from API_URL above, which is only this dashboard's own
+// internal traffic and must keep working purely locally regardless of
+// whether a public widget host exists. Falls back to API_URL/the same
+// placeholder pattern when unset, so local dev without a tunnel/real
+// host configured behaves exactly as it always has.
+const WIDGET_API_URL = process.env.NEXT_PUBLIC_WIDGET_API_URL ?? API_URL;
+const WIDGET_HOST = process.env.NEXT_PUBLIC_WIDGET_HOST ?? "https://YOUR-WIDGET-HOST";
 const DEFAULT_INSTALL_NAME = "Website";
 // Matches widget.css's own fallback (var(--csa-primary-color, #0f172a)) -
 // the color picker always needs a concrete value to display, so "still
@@ -41,18 +49,13 @@ interface WidgetSettings {
 }
 
 function embedSnippet(apiKey: string): string {
-  // No production widget-hosting URL exists yet in this project - the
-  // placeholder below is deliberate, not a guess at a real one. Whoever
-  // deploys apps/widget's built bundle (dist/widget.js) somewhere real
-  // replaces this one line; everything else in the snippet is already
-  // correct as written.
   return `<script>
   window.CSAWidgetConfig = {
     apiKey: "${apiKey}",
-    apiUrl: "${API_URL}"
+    apiUrl: "${WIDGET_API_URL}"
   };
 </script>
-<script src="https://YOUR-WIDGET-HOST/widget.js" async></script>`;
+<script src="${WIDGET_HOST}/widget.js" async></script>`;
 }
 
 function formatRelativeTime(iso: string | null): string {
