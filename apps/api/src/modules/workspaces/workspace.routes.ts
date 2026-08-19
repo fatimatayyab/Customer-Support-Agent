@@ -6,7 +6,13 @@ import { requireRole } from "../auth/require-role.js";
 import { requireSession } from "../auth/require-session.js";
 import { NotFoundError } from "../../errors.js";
 import { generateApiKey, normalizeOrigin } from "../workspace-identification/api-key.js";
-import { getApiKeyById, insertApiKey, listActiveApiKeys, revokeApiKey } from "./api-key.repository.js";
+import {
+  getApiKeyById,
+  hasAnyApiKeyEverExisted,
+  insertApiKey,
+  listActiveApiKeys,
+  revokeApiKey,
+} from "./api-key.repository.js";
 
 const MAX_ALLOWED_ORIGINS = 10;
 
@@ -58,10 +64,18 @@ export async function workspaceRoutes(app: FastifyInstance) {
   });
 
   app.get("/workspaces/api-keys", async (request, reply) => {
-    const apiKeys = await withWorkspaceContext(request.workspaceId!, (scopedDb) =>
-      listActiveApiKeys(scopedDb, request.workspaceId!),
-    );
-    reply.send({ apiKeys });
+    // everProvisioned lets the dashboard tell "never installed" (auto-
+    // provision a default) apart from "installed once, then explicitly
+    // removed" (don't silently recreate it) - both look identical as an
+    // empty apiKeys array otherwise. Only queried when the active list is
+    // actually empty - sequential, not Promise.all, since both queries
+    // share the one pg client withWorkspaceContext's transaction holds.
+    const result = await withWorkspaceContext(request.workspaceId!, async (scopedDb) => {
+      const apiKeys = await listActiveApiKeys(scopedDb, request.workspaceId!);
+      const everProvisioned = apiKeys.length > 0 || (await hasAnyApiKeyEverExisted(scopedDb, request.workspaceId!));
+      return { apiKeys, everProvisioned };
+    });
+    reply.send(result);
   });
 
   // "Get a new install code" - a single action for the case that used

@@ -68,7 +68,24 @@ export default function WidgetPage() {
   const router = useRouter();
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[] | null>(null);
+  // hasEverProvisioned distinguishes "never installed" (auto-provision a
+  // default) from "installed once, then explicitly removed" (don't
+  // silently recreate it) - both look identical as an empty apiKeys
+  // array otherwise. Comes from GET /workspaces/api-keys's everProvisioned.
+  const [hasEverProvisioned, setHasEverProvisioned] = useState(false);
+  // revealedKey/revealedKeyId represent the ONE primary install snippet
+  // shown at the top of the Install section. Gated on revealedKeyId
+  // matching the current primary's id (not just "is revealedKey set") so
+  // this box can never keep showing a snippet for a key that's since been
+  // rotated away from, or removed - see the render check below.
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const [revealedKeyId, setRevealedKeyId] = useState<string | null>(null);
+  // A secondary (non-primary) site's just-created/just-rotated raw key,
+  // shown inline in its own Advanced row - deliberately never shares the
+  // top Install box with the primary install, so "add another site" or
+  // rotating a secondary site can never be mistaken for replacing the
+  // main install code.
+  const [revealedSiteKey, setRevealedSiteKey] = useState<{ id: string; rawKey: string } | null>(null);
   const [installBusy, setInstallBusy] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const [newSiteName, setNewSiteName] = useState("");
@@ -86,11 +103,39 @@ export default function WidgetPage() {
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
   const [appearanceSaved, setAppearanceSaved] = useState(false);
 
-  async function refresh(): Promise<ApiKeySummary[]> {
-    const data = await apiFetch<{ apiKeys: ApiKeySummary[] }>("/workspaces/api-keys");
+  async function refresh(): Promise<{ keys: ApiKeySummary[]; everProvisioned: boolean }> {
+    const data = await apiFetch<{ apiKeys: ApiKeySummary[]; everProvisioned: boolean }>("/workspaces/api-keys");
     const keys = data?.apiKeys ?? [];
+    const everProvisioned = data?.everProvisioned ?? false;
     setApiKeys(keys);
-    return keys;
+    setHasEverProvisioned(everProvisioned);
+    return { keys, everProvisioned };
+  }
+
+  // Shared by the first-visit auto-provision below and the manual
+  // "Create an install code" button (shown once a workspace has
+  // explicitly removed its only install - see the !primary branch in the
+  // render). Always creates the default-named install, which becomes the
+  // primary by virtue of being the workspace's only/oldest key.
+  async function handleCreateDefaultInstall() {
+    setInstallBusy(true);
+    setInstallError(null);
+    try {
+      const result = await apiFetch<{ apiKey: ApiKeySummary & { rawKey: string } }>("/workspaces/api-keys", {
+        method: "POST",
+        body: JSON.stringify({ name: DEFAULT_INSTALL_NAME }),
+      });
+      if (result) {
+        setRevealedKey(result.apiKey.rawKey);
+        setRevealedKeyId(result.apiKey.id);
+        setApiKeys((keys) => (keys ? [...keys, result.apiKey] : [result.apiKey]));
+        setHasEverProvisioned(true);
+      }
+    } catch (err) {
+      setInstallError(err instanceof ApiError ? err.message : "Could not set up your install code.");
+    } finally {
+      setInstallBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -107,27 +152,15 @@ export default function WidgetPage() {
     });
 
     refresh()
-      .then(async (keys) => {
-        // First visit: nothing installed yet, so there's nothing to
-        // decide - silently provision the default install rather than
-        // asking the owner to understand "create a key" before they can
-        // even see what an install looks like.
-        if (keys.length === 0) {
-          setInstallBusy(true);
-          try {
-            const result = await apiFetch<{ apiKey: ApiKeySummary & { rawKey: string } }>("/workspaces/api-keys", {
-              method: "POST",
-              body: JSON.stringify({ name: DEFAULT_INSTALL_NAME }),
-            });
-            if (result) {
-              setRevealedKey(result.apiKey.rawKey);
-              setApiKeys([result.apiKey]);
-            }
-          } catch (err) {
-            setInstallError(err instanceof ApiError ? err.message : "Could not set up your install code.");
-          } finally {
-            setInstallBusy(false);
-          }
+      .then(async ({ keys, everProvisioned }) => {
+        // Only true first visit auto-provisions: nothing installed yet
+        // AND this workspace has never had a key row at all. If it has
+        // (everProvisioned, from a key that was later explicitly
+        // removed), an empty list means "removed on purpose" - showing
+        // the manual !primary/"Create an install code" state instead,
+        // not silently undoing that removal on every reload.
+        if (keys.length === 0 && !everProvisioned) {
+          await handleCreateDefaultInstall();
         }
       })
       .catch((err) => {
@@ -173,7 +206,13 @@ export default function WidgetPage() {
     await navigator.clipboard.writeText(text);
   }
 
+  // Handles rotation for BOTH the Install section's primary button and
+  // Advanced's per-row "Rotate" - which box the new code lands in depends
+  // on whether the rotated key is the current primary, not on which
+  // button was clicked, so the two stay behaviorally identical for the
+  // primary's own row.
   async function handleGetNewCode(id: string) {
+    const isPrimary = id === primary?.id;
     setInstallBusy(true);
     setInstallError(null);
     try {
@@ -182,7 +221,12 @@ export default function WidgetPage() {
         { method: "POST" },
       );
       if (result) {
-        setRevealedKey(result.apiKey.rawKey);
+        if (isPrimary) {
+          setRevealedKey(result.apiKey.rawKey);
+          setRevealedKeyId(result.apiKey.id);
+        } else {
+          setRevealedSiteKey({ id: result.apiKey.id, rawKey: result.apiKey.rawKey });
+        }
         setApiKeys((keys) => (keys ? keys.map((key) => (key.id === id ? result.apiKey : key)) : [result.apiKey]));
       }
     } catch (err) {
@@ -192,6 +236,10 @@ export default function WidgetPage() {
     }
   }
 
+  // Always reveals into the Advanced-row box (revealedSiteKey), never the
+  // top Install snippet - "add another site" creates a second, distinct
+  // credential for the same assistant, it never replaces the primary
+  // install, so its raw key should never appear in that box.
   async function handleAddSite(event: FormEvent) {
     event.preventDefault();
     setAdvancedError(null);
@@ -205,8 +253,9 @@ export default function WidgetPage() {
         body: JSON.stringify({ name: newSiteName, ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}) }),
       });
       if (result) {
-        setRevealedKey(result.apiKey.rawKey);
+        setRevealedSiteKey({ id: result.apiKey.id, rawKey: result.apiKey.rawKey });
         setApiKeys((keys) => (keys ? [...keys, result.apiKey] : [result.apiKey]));
+        setHasEverProvisioned(true);
         setNewSiteName("");
         setNewSiteDomains("");
       }
@@ -221,6 +270,18 @@ export default function WidgetPage() {
     try {
       await apiFetch(`/workspaces/api-keys/${id}`, { method: "DELETE" });
       setApiKeys((keys) => (keys ? keys.filter((key) => key.id !== id) : keys));
+      // Clear a reveal box that belonged to whatever was just removed -
+      // the render conditions below already re-derive from apiKeys/primary
+      // and would hide these on their own, but clearing explicitly avoids
+      // holding a removed key's raw value in memory any longer than needed.
+      setRevealedKeyId((current) => {
+        if (current === id) {
+          setRevealedKey(null);
+          return null;
+        }
+        return current;
+      });
+      setRevealedSiteKey((current) => (current?.id === id ? null : current));
     } catch (err) {
       setAdvancedError(err instanceof ApiError ? err.message : "Could not remove this site.");
     } finally {
@@ -265,7 +326,12 @@ export default function WidgetPage() {
 
         {installBusy && !revealedKey && <p className="text-sm text-slate-500">Setting up your install code...</p>}
 
-        {revealedKey && (
+        {/* Gated on revealedKeyId matching the current primary's id, not
+            just "is revealedKey set" - if the primary is later rotated
+            again or removed, this box must stop showing this stale raw
+            value rather than keep displaying a code that's no longer the
+            active credential. */}
+        {revealedKey && revealedKeyId === primary?.id && (
           <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
             <p className="mb-1 font-medium text-amber-800">
               Add this to your site to turn your assistant on. This code identifies your widget - it&apos;s fine for
@@ -306,6 +372,27 @@ export default function WidgetPage() {
                 This replaces your current code for this same install - it doesn&apos;t add a second one. The old
                 code stops working the moment you do this, so update your site with the new one right away.
               </p>
+            )}
+          </div>
+        )}
+
+        {/* Not the same as "loading" (apiKeys === null, handled above by
+            returning null): this is a workspace that has explicitly
+            removed its only install and hasn't recreated one - the empty
+            apiKeys array here must NOT silently auto-provision a
+            replacement (that's exactly the bug this state exists to
+            avoid; see hasEverProvisioned/refresh()'s mount-effect check). */}
+        {!primary && !installBusy && (
+          <div className="rounded-md border border-slate-200 p-3 text-sm">
+            <div className="font-medium text-slate-700">Not installed</div>
+            <div className="text-slate-500">No active install code for this workspace right now.</div>
+            {canManageWidget && (
+              <button
+                onClick={handleCreateDefaultInstall}
+                className="mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white"
+              >
+                Create an install code
+              </button>
             )}
           </div>
         )}
@@ -393,6 +480,10 @@ export default function WidgetPage() {
                   className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500 disabled:opacity-50"
                 />
               </div>
+              <span className="text-xs text-slate-500">
+                Must be a link to an image that&apos;s already publicly reachable online, not a file on your
+                computer - uploading an image directly isn&apos;t supported yet.
+              </span>
             </label>
 
             {appearanceError && <p className="text-sm text-red-600">{appearanceError}</p>}
@@ -421,34 +512,58 @@ export default function WidgetPage() {
           <ul className="mb-4 divide-y divide-slate-200 rounded-md border border-slate-200">
             {apiKeys.length === 0 && <li className="p-3 text-sm text-slate-500">No sites yet.</li>}
             {apiKeys.map((key) => (
-              <li key={key.id} className="flex items-center justify-between gap-4 p-3 text-sm">
-                <div>
+              <li key={key.id} className="flex flex-col gap-2 p-3 text-sm">
+                <div className="flex items-center justify-between gap-4">
                   <div>
-                    {key.name} <code className="text-slate-500">{key.keyPrefix}...</code>
+                    <div>
+                      {key.name} <code className="text-slate-500">{key.keyPrefix}...</code>
+                    </div>
+                    <div className="text-slate-500">
+                      {key.allowedOrigins && key.allowedOrigins.length > 0
+                        ? `restricted to ${key.allowedOrigins.join(", ")}`
+                        : "not restricted to any domain"}
+                    </div>
                   </div>
-                  <div className="text-slate-500">
-                    {key.allowedOrigins && key.allowedOrigins.length > 0
-                      ? `restricted to ${key.allowedOrigins.join(", ")}`
-                      : "not restricted to any domain"}
-                  </div>
+                  {canManageWidget && (
+                    <div className="flex shrink-0 gap-3">
+                      <button
+                        onClick={() => handleGetNewCode(key.id)}
+                        disabled={advancedBusy === key.id}
+                        title="Replaces this site's code - the old one stops working immediately."
+                        className="text-slate-600 underline disabled:opacity-50"
+                      >
+                        Rotate
+                      </button>
+                      <button
+                        onClick={() => handleRevoke(key.id)}
+                        disabled={advancedBusy === key.id}
+                        className="text-red-600 underline disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
                 </div>
-                {canManageWidget && (
-                  <div className="flex shrink-0 gap-3">
-                    <button
-                      onClick={() => handleGetNewCode(key.id)}
-                      disabled={advancedBusy === key.id}
-                      title="Replaces this site's code - the old one stops working immediately."
-                      className="text-slate-600 underline disabled:opacity-50"
-                    >
-                      Rotate
-                    </button>
-                    <button
-                      onClick={() => handleRevoke(key.id)}
-                      disabled={advancedBusy === key.id}
-                      className="text-red-600 underline disabled:opacity-50"
-                    >
-                      Remove
-                    </button>
+                {/* A secondary site's own reveal, scoped to its row - never
+                    the top Install box, so it can't be mistaken for a
+                    replacement of the primary install's code. */}
+                {revealedSiteKey?.id === key.id && (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+                    <p className="mb-1 font-medium text-amber-800">
+                      Code for &ldquo;{key.name}&rdquo; - add this to that site. It&apos;s a separate credential from
+                      your main install; it doesn&apos;t replace it.
+                    </p>
+                    <div className="flex items-start gap-2">
+                      <pre className="flex-1 overflow-x-auto rounded bg-white p-2 text-xs">
+                        {embedSnippet(revealedSiteKey.rawKey)}
+                      </pre>
+                      <button
+                        onClick={() => copyToClipboard(embedSnippet(revealedSiteKey.rawKey))}
+                        className="shrink-0 rounded-md border border-amber-300 px-2 py-1 text-xs"
+                      >
+                        Copy
+                      </button>
+                    </div>
                   </div>
                 )}
               </li>
@@ -457,6 +572,11 @@ export default function WidgetPage() {
 
           {canManageWidget && (
             <form onSubmit={handleAddSite} className="flex flex-col gap-2">
+              <p className="text-xs text-slate-500">
+                A site is a separate domain that gets its own code and can be restricted to its own origin - it still
+                shares this same assistant, knowledge base, and Appearance settings. This doesn&apos;t rotate or
+                replace your existing codes.
+              </p>
               <div className="flex gap-2">
                 <input
                   value={newSiteName}
