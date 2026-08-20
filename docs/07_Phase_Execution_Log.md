@@ -869,3 +869,35 @@ What's still required before that placeholder can be replaced with a real one:
 - **Replacing the placeholder once a real URL exists**: `embedSnippet()` in `apps/dashboard/app/widget/page.tsx` is the one place that needs to change - ideally reading from a `NEXT_PUBLIC_`-prefixed env var (matching the existing `NEXT_PUBLIC_API_URL` pattern already used one line above it in the same file) so the value can differ per environment, rather than a second hardcoded literal.
 - **HTTPS is already assumed** in the placeholder (`https://`) and must be true of whatever real host is chosen - browsers block a mixed-content `http://` script load from an `https://` customer page.
 - No CORS change is needed for the script load itself (a `<script src>` tag isn't subject to CORS); the widget's own `fetch`/WebSocket calls back to the API already have open-origin CORS handled (`app.ts`'s `/widget/*` branch) independent of wherever `widget.js` is served from.
+
+## Milestone: Dashboard UI/UX Redesign (Phases 1-6)
+
+**Status:** ✅ Completed & Verified
+
+A six-phase redesign of both dashboards (Workspace + Platform Owner), preceded by a read-only UI/UX audit against the live implementation rather than a from-scratch mockup. Established a shared design system and primitive library, then applied it screen by screen. No API contracts, permissions, schema, or business logic changed at any point - this was a presentation-layer initiative throughout.
+
+### Key Deliverables Built
+
+- **Phase 1 - Shell + primitives:** a persistent sidebar shell for the Workspace dashboard and a visually distinct top-bar shell for Platform, both built on a shared Tailwind v4 token system and a new primitive library (`Button`, `Field`, `Badge`, `Card`, `Table`, `Tabs`, `Accordion`, `EmptyState`, `Skeleton`, `ErrorState`, `Toast`, `ConfirmDialog`). Routes moved into `(workspace)`/`platform/(dashboard)` route groups with no URL changes. Session is now resolved server-side per route group (`lib/session-server.ts`) instead of fetched client-side on every page.
+- **Phase 2 - Conversations queue + detail:** the message thread rewritten as sender-differentiated chat bubbles (customer/agent/AI, mirroring the widget's own message styling), queue-row timestamps disambiguate same-day vs. older.
+- **Phases 3 & 4 - Platform, Knowledge, Widget, Team, Integrations:** `ConfirmDialog` wired into every previously single-click destructive action (suspend, revoke, delete, disconnect, remove); remaining blank-screen loading states replaced with `Skeleton`.
+- **Phase 5 - Analytics:** the conversation-volume chart replaced with a hand-rolled, zero-fill-corrected SVG line chart (the API only returns days that had at least one conversation; charting that directly would have compressed gaps and misrepresented the trend). Overview (`/`) gained a live "Needs attention" stat strip reusing the Conversations queue's own filtered endpoints instead of a new one.
+- **Phase 6 - Dark mode + polish:** a full dark theme via Tailwind CSS-variable overrides (OS preference plus an explicit toggle persisted to `localStorage`), a mobile-responsive card fallback for the Platform workspace table (previously showed only 2 of 7 columns below `md` with no scroll affordance), `Toast` wired into three previously-silent clipboard-copy actions, and keyboard accessibility (`Escape` + initial focus) added to `ConfirmDialog` and the mobile nav drawer.
+
+### Decisions Made During Implementation
+
+- **Hand-rolled primitives (Tabs/Accordion/ConfirmDialog/Toast), no Radix/Headless UI dependency** - kept the new dependency surface to `lucide-react` alone.
+- **Dark mode via CSS-variable overrides, not `dark:` classes on every page.** Tailwind v4 utilities compile to `var(--color-*)` references, so redefining the palette's variables under a theme selector applies to every existing `bg-white`/`text-slate-900`/`border-slate-200` automatically; only the handful of spots where one Tailwind class meant two conflicting things (e.g. `white` as both "card surface" and "button-label text") needed a direct, deliberate edit.
+- **Destructive-action terminology ("Delete"/"Revoke"/"Disconnect"/"Remove") deliberately left as-is** after reconsidering the original audit's "inconsistent verbs" note with full context - each is the precise term for its resource type, not drift.
+- **Favicon/branding explicitly deferred, not decided by default** - no existing brand mark exists to build from anywhere in the product.
+
+### Bugs Found and Fixed During Live Verification
+
+- **The widget page auto-provisioned two install keys on one visit instead of one**, introduced by Phase 1's shell/session work. Root cause: gating every page behind a client-only session fetch meant real page content only ever mounted after hydration - exactly the shape React's dev-mode Strict Mode double-invokes to catch effects that aren't safe to run twice, which the widget's auto-provision effect wasn't. Fixed by resolving the session server-side in each route-group layout instead of client-side, matching how the pre-redesign pages always included real content in their first render.
+- **Overview's "Needs attention" stat fetch had no error handling** (found during a dedicated post-Phase-6 review pass) - unlike every sibling page, a failed `/conversations` request left the stat cards stuck on skeletons indefinitely instead of redirecting like the rest of the app. Fixed to match the existing `.catch(() => router.push("/login"))` pattern already used on every other workspace page.
+
+### Verified
+
+- `pnpm -r run typecheck` clean across all 6 workspace packages after every phase, including the final review-pass fixes.
+- **Live, via Playwright against disposable workspaces (never the real "f15 solutions"/"build iq" data), for every phase:** full navigation click-through at desktop and mobile widths with zero console errors; a real signup -> real widget message -> real AI reply -> real agent reply flow for the Conversations bubble redesign; a seeded 14-day conversation history for the Analytics chart's zero-fill/spike rendering; OS-dark-preference and explicit-toggle-with-persistence-across-reload for dark mode on both shells.
+- **Dedicated post-Phase-6 review pass:** re-confirmed the Phase 1 double-provisioning fix still holds after Phase 6 touched `layout.tsx` directly; diffed `globals.css` to confirm light mode renders identically to pre-Phase-6; grepped the full codebase for any remaining raw-color role conflicts; confirmed no debug/console artifacts shipped; confirmed the working tree contained no unrelated changes.
