@@ -96,3 +96,12 @@ Inspect first, run what's relevant — don't run the full stack for a trivial or
 - If the task touches the DB/API: `pnpm docker:up` (Postgres 5433, Redis) and `pnpm -r run typecheck` before changing anything.
 - Before considering DB/API work done: `pnpm --filter @csa/db test` / `--filter @csa/api test` (first run: `test:db:setup`).
 - RAG/knowledge work: confirm `VOYAGE_API_KEY` is set.
+
+## 9. Response Reporting
+After completing a substantive task, end the response with a concise **Summary** containing:
+- What was done
+- Important decisions/findings
+- Anything requiring user action or approval
+
+Keep it to 2–4 bullets. Do not repeat the detailed report.
+For trivial actions or simple questions, skip the summary.
