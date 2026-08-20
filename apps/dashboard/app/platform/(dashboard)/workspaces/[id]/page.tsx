@@ -6,6 +6,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input, Textarea } from "@/components/ui/field";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -90,6 +91,8 @@ export default function PlatformWorkspaceDetailPage() {
   const [metaError, setMetaError] = useState<string | null>(null);
   const [keyActionBusy, setKeyActionBusy] = useState<string | null>(null);
   const [keyActionError, setKeyActionError] = useState<string | null>(null);
+  const [suspendConfirmOpen, setSuspendConfirmOpen] = useState(false);
+  const [revokeKeyTarget, setRevokeKeyTarget] = useState<ApiKeySummary | null>(null);
 
   async function refresh() {
     const data = await apiFetch<WorkspaceDetail>(`/platform/workspaces/${params.id}`);
@@ -111,7 +114,7 @@ export default function PlatformWorkspaceDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
-  async function handleToggleStatus() {
+  async function performToggleStatus() {
     if (!detail) return;
     setBusy(true);
     setError(null);
@@ -123,6 +126,18 @@ export default function PlatformWorkspaceDetailPage() {
       setError(err instanceof ApiError ? err.message : `Could not ${action} the workspace.`);
     } finally {
       setBusy(false);
+      setSuspendConfirmOpen(false);
+    }
+  }
+
+  // Same asymmetry as the workspace list: suspend gets a confirm step
+  // (it immediately cuts off live widget traffic), reactivate doesn't.
+  function handleToggleStatus() {
+    if (!detail) return;
+    if (detail.workspace.status === "active") {
+      setSuspendConfirmOpen(true);
+    } else {
+      void performToggleStatus();
     }
   }
 
@@ -144,7 +159,7 @@ export default function PlatformWorkspaceDetailPage() {
     }
   }
 
-  async function handleRevokeKey(keyId: string) {
+  async function performRevokeKey(keyId: string) {
     if (!detail) return;
     setKeyActionBusy(keyId);
     setKeyActionError(null);
@@ -155,6 +170,7 @@ export default function PlatformWorkspaceDetailPage() {
       setKeyActionError(err instanceof ApiError ? err.message : "Could not revoke this key.");
     } finally {
       setKeyActionBusy(null);
+      setRevokeKeyTarget(null);
     }
   }
 
@@ -190,7 +206,12 @@ export default function PlatformWorkspaceDetailPage() {
           </div>
           <div className="flex items-center gap-3">
             <Badge tone={workspace.status === "active" ? "success" : "danger"}>{workspace.status}</Badge>
-            <Button size="sm" onClick={handleToggleStatus} disabled={busy}>
+            <Button
+              size="sm"
+              variant={workspace.status === "active" ? "destructive" : "primary"}
+              onClick={handleToggleStatus}
+              disabled={busy}
+            >
               {workspace.status === "active" ? "Suspend workspace" : "Reactivate workspace"}
             </Button>
           </div>
@@ -266,7 +287,7 @@ export default function PlatformWorkspaceDetailPage() {
                 </div>
                 {!key.revokedAt && (
                   <button
-                    onClick={() => handleRevokeKey(key.id)}
+                    onClick={() => setRevokeKeyTarget(key)}
                     disabled={keyActionBusy === key.id}
                     className="shrink-0 text-red-600 hover:underline disabled:opacity-50"
                   >
@@ -307,6 +328,26 @@ export default function PlatformWorkspaceDetailPage() {
           </ul>
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={suspendConfirmOpen}
+        onOpenChange={setSuspendConfirmOpen}
+        title={`Suspend ${workspace.name}?`}
+        description="This immediately stops their widget from accepting new traffic and blocks dashboard logins. You can reactivate at any time."
+        confirmLabel="Suspend workspace"
+        busy={busy}
+        onConfirm={performToggleStatus}
+      />
+
+      <ConfirmDialog
+        open={revokeKeyTarget !== null}
+        onOpenChange={(open) => !open && setRevokeKeyTarget(null)}
+        title={`Revoke "${revokeKeyTarget?.name}"?`}
+        description="Any site using this key stops working immediately. This can't be undone - a new key would need to be issued instead."
+        confirmLabel="Revoke key"
+        busy={revokeKeyTarget !== null && keyActionBusy === revokeKeyTarget.id}
+        onConfirm={() => revokeKeyTarget && performRevokeKey(revokeKeyTarget.id)}
+      />
     </div>
   );
 }

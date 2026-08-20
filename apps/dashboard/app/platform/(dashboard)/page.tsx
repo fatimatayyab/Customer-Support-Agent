@@ -6,10 +6,12 @@ import { type FormEvent, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/field";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
 import { apiFetch, ApiError } from "@/lib/api";
+import { cn } from "@/lib/cn";
 
 interface WorkspaceRow {
   id: string;
@@ -53,6 +55,8 @@ export default function PlatformHome() {
   const [revealedInviteUrl, setRevealedInviteUrl] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [suspendTarget, setSuspendTarget] = useState<WorkspaceRow | null>(null);
+  const [revokeInviteTarget, setRevokeInviteTarget] = useState<WorkspaceInvite | null>(null);
 
   async function refresh() {
     const [workspacesData, invitesData] = await Promise.all([
@@ -90,7 +94,7 @@ export default function PlatformHome() {
     }
   }
 
-  async function handleRevokeInvite(id: string) {
+  async function performRevokeInvite(id: string) {
     setActionBusy(id);
     setActionError(null);
     try {
@@ -100,10 +104,11 @@ export default function PlatformHome() {
       setActionError(err instanceof ApiError ? err.message : "Could not revoke the invite.");
     } finally {
       setActionBusy(null);
+      setRevokeInviteTarget(null);
     }
   }
 
-  async function handleToggleStatus(workspace: WorkspaceRow) {
+  async function performToggleStatus(workspace: WorkspaceRow) {
     setActionBusy(workspace.id);
     setActionError(null);
     const action = workspace.status === "active" ? "suspend" : "reactivate";
@@ -114,7 +119,24 @@ export default function PlatformHome() {
       setActionError(err instanceof ApiError ? err.message : `Could not ${action} the workspace.`);
     } finally {
       setActionBusy(null);
+      setSuspendTarget(null);
     }
+  }
+
+  // Suspending immediately cuts off a live client's widget traffic - it
+  // gets a confirm step. Reactivating just turns things back on, is
+  // easily reversible, and stays a single click, matching how the
+  // conversation reassign confirm only gates the actually-risky direction.
+  function handleToggleStatus(workspace: WorkspaceRow) {
+    if (workspace.status === "active") {
+      setSuspendTarget(workspace);
+    } else {
+      void performToggleStatus(workspace);
+    }
+  }
+
+  function handleRevokeInvite(invite: WorkspaceInvite) {
+    setRevokeInviteTarget(invite);
   }
 
   async function copyToClipboard(text: string) {
@@ -190,7 +212,10 @@ export default function PlatformHome() {
                     <button
                       onClick={() => handleToggleStatus(workspace)}
                       disabled={actionBusy === workspace.id}
-                      className="text-slate-600 hover:underline disabled:opacity-50"
+                      className={cn(
+                        "hover:underline disabled:opacity-50",
+                        workspace.status === "active" ? "text-red-600" : "text-slate-600",
+                      )}
                     >
                       {workspace.status === "active" ? "Suspend" : "Reactivate"}
                     </button>
@@ -251,7 +276,7 @@ export default function PlatformHome() {
                     </div>
                     {state === "pending" && (
                       <button
-                        onClick={() => handleRevokeInvite(invite.id)}
+                        onClick={() => handleRevokeInvite(invite)}
                         disabled={actionBusy === invite.id}
                         className="shrink-0 text-red-600 hover:underline disabled:opacity-50"
                       >
@@ -265,6 +290,26 @@ export default function PlatformHome() {
           </div>
         </CardBody>
       </Card>
+
+      <ConfirmDialog
+        open={suspendTarget !== null}
+        onOpenChange={(open) => !open && setSuspendTarget(null)}
+        title={`Suspend ${suspendTarget?.name}?`}
+        description="This immediately stops their widget from accepting new traffic and blocks dashboard logins. You can reactivate at any time."
+        confirmLabel="Suspend workspace"
+        busy={suspendTarget !== null && actionBusy === suspendTarget.id}
+        onConfirm={() => suspendTarget && performToggleStatus(suspendTarget)}
+      />
+
+      <ConfirmDialog
+        open={revokeInviteTarget !== null}
+        onOpenChange={(open) => !open && setRevokeInviteTarget(null)}
+        title="Revoke this signup link?"
+        description={`${revokeInviteTarget?.email} won't be able to use it to create a workspace anymore.`}
+        confirmLabel="Revoke link"
+        busy={revokeInviteTarget !== null && actionBusy === revokeInviteTarget.id}
+        onConfirm={() => revokeInviteTarget && performRevokeInvite(revokeInviteTarget.id)}
+      />
     </div>
   );
 }
