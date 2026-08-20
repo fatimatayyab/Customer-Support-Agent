@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-How Claude Code must behave in this repo — guardrails, not documentation. What/why lives in `docs/00`–`06`; what's built in `docs/07_Phase_Execution_Log.md`; general engineering principles in `docs/05_Engineering_Bible.md`; recurring-task SOPs in `SKILLS.md`. Read only what a task needs — don't front-load all docs every session.
+How Claude Code must behave in this repo — guardrails, not documentation. What/why lives in `docs/00`–`06`; what's built in `docs/07_Phase_Execution_Log.md`; general engineering principles in `docs/05_Engineering_Bible.md`; recurring-task SOPs in `.claude/skills/`; the team roster in `AGENTS.md` and `.claude/agents/`; feature work is coordinated via `.claude/commands/orchestrator.md`; fixed recurring workflows via Operators, indexed in `.claude/operators/README.md`. Read only what a task needs — don't front-load all docs every session.
 
 ---
 
@@ -33,7 +33,7 @@ Settled decisions (Drizzle, pnpm, dual RLS+app scoping, stateless JWT, in-proces
 
 ## 3. Working Conventions
 
-- Extend an existing module/repository/service before creating one; check `docs/07` before assuming something's unbuilt; check `SKILLS.md` for a recurring task's SOP before improvising.
+- Extend an existing module/repository/service before creating one; check `docs/07` before assuming something's unbuilt; check `.claude/skills/` for a recurring task's SOP before improvising.
 - Repository files (`<entity>.repository.ts`): plain functions taking `ScopedDb`, never a class, never raw `db`.
 - Zod-validate every request body at the route boundary. Role checks go through `requireRole()` — never an inline copy.
 - Errors: `throw` an `AppError` subclass; the central handler shapes the response, route handlers don't format one themselves.
@@ -74,6 +74,7 @@ Settled decisions (Drizzle, pnpm, dual RLS+app scoping, stateless JWT, in-proces
 - [ ] No Orchestrator bypass, no AI-Service business logic, no direct vendor calls outside a provider module.
 - [ ] No dead code, no duplicated logic, no secrets in the diff.
 - [ ] `docs/07` updated if this completes or meaningfully advances a phase.
+- [ ] Architecture & Readiness Review Operator run for non-trivial changes (`.claude/operators/architecture-readiness-review/`).
 - [ ] **Nothing committed unless explicitly asked, this turn** — prior approval doesn't carry forward.
 
 ---

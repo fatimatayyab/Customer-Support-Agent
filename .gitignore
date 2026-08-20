@@ -24,7 +24,11 @@ Thumbs.db
 
 .history/
 .qodo/
-.claude/
+
+# .claude/ holds the project's engineering framework (agents, skills,
+# commands, operators) and is tracked. Only local/runtime state is excluded.
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
 
 coverage/
 
