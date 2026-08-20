@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api";
+import { formatQueueTimestamp } from "@/lib/format-time";
 
 interface ConversationSummary {
   id: string;
@@ -151,8 +152,7 @@ export default function ConversationsPage() {
                 </div>
               </div>
               <div className="shrink-0 text-slate-500">
-                {conversation.assignedUserName ?? "Unassigned"} ·{" "}
-                {new Date(conversation.updatedAt).toLocaleTimeString()}
+                {conversation.assignedUserName ?? "Unassigned"} · {formatQueueTimestamp(conversation.updatedAt)}
               </div>
             </Link>
           ))}

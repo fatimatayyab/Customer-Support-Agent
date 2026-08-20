@@ -1,5 +1,6 @@
 "use client";
 
+import { Bot } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useRef, useState } from "react";
@@ -10,6 +11,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input, Select, Textarea } from "@/components/ui/field";
 import { PageSkeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/cn";
 import { useSession } from "@/lib/session-context";
 import { ApiError, apiFetch } from "@/lib/api";
 import { AgentConsoleConnection, type WireMessage } from "@/lib/agent-console-ws-client";
@@ -62,6 +64,57 @@ const ESCALATION_REASON_LABELS: Record<string, string> = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+
+// Mirrors the widget's own message convention (apps/widget/src/widget.css's
+// .message-customer / .message-agent,.message-ai,.message-system) but
+// mirrored: from an agent's own console, the workspace's own replies -
+// agent, AI, and "system" (the hardcoded fallback/confirmation text the
+// Orchestrator sends when there's no relevant knowledge or a contact
+// was just captured - always customer-facing, never an internal notice,
+// see support-orchestrator.ts's insertMessage calls) - are all "our
+// side" (right-aligned). Only the customer is the other party
+// (left-aligned). Grouping system with agent/ai here, not as a separate
+// plain-text notice, matches exactly what the customer themselves saw.
+function isOutboundSender(senderType: WireMessage["senderType"]): boolean {
+  return senderType !== "customer";
+}
+
+const SENDER_LABELS: Record<WireMessage["senderType"], string> = {
+  customer: "Customer",
+  agent: "Agent",
+  ai: "AI",
+  system: "AI",
+};
+
+function formatMessageTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function MessageBubble({ message }: { message: WireMessage }) {
+  const outbound = isOutboundSender(message.senderType);
+  const isAutomated = message.senderType === "ai" || message.senderType === "system";
+  const label = message.senderName ?? SENDER_LABELS[message.senderType];
+
+  return (
+    <div className={cn("flex flex-col gap-0.5", outbound ? "items-end" : "items-start")}>
+      <span className="flex items-center gap-1 px-1 text-xs font-medium text-slate-500">
+        {isAutomated && <Bot className="h-3 w-3" />}
+        {label}
+      </span>
+      <div
+        className={cn(
+          "max-w-[80%] rounded-2xl px-3 py-2 text-sm break-words",
+          outbound
+            ? cn("rounded-br-sm text-white", isAutomated ? "bg-slate-700" : "bg-brand")
+            : "rounded-bl-sm bg-slate-100 text-slate-900",
+        )}
+      >
+        {message.content}
+      </div>
+      <span className="px-1 text-[11px] text-slate-400">{formatMessageTime(message.createdAt)}</span>
+    </div>
+  );
+}
 
 export default function ConversationDetailPage() {
   const params = useParams<{ id: string }>();
@@ -293,7 +346,7 @@ export default function ConversationDetailPage() {
                 {claimLabel}
               </Button>
             )}
-            {isMine && <span className="text-sm text-slate-500">Assigned to you</span>}
+            {isMine && <Badge tone="info">Assigned to you</Badge>}
             <Select
               value={conversation.status}
               onChange={(event) => handleStatusChange(event.target.value as "resolved" | "closed" | "open")}
@@ -358,15 +411,18 @@ export default function ConversationDetailPage() {
         </Card>
 
         <Card className="mb-3">
-          <div ref={scrollRef} className="h-96 overflow-y-auto p-3">
+          <div ref={scrollRef} className="flex h-96 flex-col gap-3 overflow-y-auto p-3">
             {!connected && <p className="text-sm text-slate-500">{reconnecting ? "Reconnecting..." : "Connecting..."}</p>}
             {messages.map((message) => (
-              <div key={message.id} className="mb-2 text-sm">
-                <span className="font-medium text-slate-900">{message.senderName ?? message.senderType}: </span>
-                <span className="text-slate-700">{message.content}</span>
-              </div>
+              <MessageBubble key={message.id} message={message} />
             ))}
-            {typing && <div className="text-sm text-slate-400">...</div>}
+            {typing && (
+              <div className="flex items-center gap-1 self-end rounded-2xl rounded-br-sm bg-slate-700 px-3 py-2">
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/70 [animation-delay:-0.3s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/70 [animation-delay:-0.15s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/70" />
+              </div>
+            )}
           </div>
         </Card>
 
@@ -423,27 +479,31 @@ export default function ConversationDetailPage() {
         )}
 
         <h2 className="mb-2 text-sm font-semibold tracking-wide text-slate-500 uppercase">Internal notes</h2>
-        <ul className="mb-3 space-y-2">
-          {notes.length === 0 && <li className="text-sm text-slate-500">No notes yet.</li>}
-          {notes.map((note) => (
-            <li key={note.id} className="rounded-md border border-amber-200 bg-amber-50 p-2 text-sm">
-              <div className="mb-1 text-xs font-medium text-amber-800">{note.authorName}</div>
-              {note.content}
-            </li>
-          ))}
-        </ul>
-        <form onSubmit={handleAddNote} className="flex flex-col gap-2">
-          <Textarea
-            value={noteDraft}
-            onChange={(event) => setNoteDraft(event.target.value)}
-            placeholder="Add a note (not visible to the customer)..."
-            rows={3}
-            className="py-1.5"
-          />
-          <Button type="submit" variant="outline" size="sm">
-            Add note
-          </Button>
-        </form>
+        <Card>
+          <CardBody className="flex flex-col gap-3">
+            <ul className="flex flex-col gap-2">
+              {notes.length === 0 && <li className="text-sm text-slate-500">No notes yet.</li>}
+              {notes.map((note) => (
+                <li key={note.id} className="rounded-md border border-amber-200 bg-amber-50 p-2 text-sm">
+                  <div className="mb-1 text-xs font-medium text-amber-800">{note.authorName}</div>
+                  {note.content}
+                </li>
+              ))}
+            </ul>
+            <form onSubmit={handleAddNote} className="flex flex-col gap-2">
+              <Textarea
+                value={noteDraft}
+                onChange={(event) => setNoteDraft(event.target.value)}
+                placeholder="Add a note (not visible to the customer)..."
+                rows={3}
+                className="py-1.5"
+              />
+              <Button type="submit" variant="outline" size="sm">
+                Add note
+              </Button>
+            </form>
+          </CardBody>
+        </Card>
       </aside>
     </div>
   );
