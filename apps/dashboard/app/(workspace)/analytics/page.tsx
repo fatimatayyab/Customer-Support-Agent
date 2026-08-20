@@ -96,6 +96,28 @@ function formatPercent(value: number | null): string {
   return value === null ? "—" : `${Math.round(value * 100)}%`;
 }
 
+// The API only returns rows for days that actually had a conversation
+// (a plain GROUP BY, no zero-fill - see getConversationVolumeByDay) -
+// charting that directly would compress empty stretches and misrepresent
+// the trend. Zero-filling here, client-side, keeps the API a plain
+// aggregation query while making the chart actually correct.
+function buildDailySeries(volumeByDay: VolumeByDay[], days: number): VolumeByDay[] {
+  const byDate = new Map(volumeByDay.map((row) => [row.date, row.count]));
+  const series: VolumeByDay[] = [];
+  const today = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - i);
+    const key = date.toISOString().slice(0, 10);
+    series.push({ date: key, count: byDate.get(key) ?? 0 });
+  }
+  return series;
+}
+
+function formatChartDate(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export default function AnalyticsPage() {
   const router = useRouter();
   const [days, setDays] = useState<number>(30);
@@ -131,7 +153,7 @@ export default function AnalyticsPage() {
             key={option}
             onClick={() => setDays(option)}
             className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
-              days === option ? "border-brand bg-brand text-white" : "border-slate-300 text-slate-600 hover:bg-slate-50"
+              days === option ? "border-brand bg-brand text-on-fill" : "border-slate-300 text-slate-600 hover:bg-slate-50"
             }`}
           >
             Last {option} days
@@ -162,7 +184,7 @@ export default function AnalyticsPage() {
               {overview.volumeByDay.length === 0 ? (
                 <p className="text-sm text-slate-500">No conversations in this range.</p>
               ) : (
-                <BarList items={overview.volumeByDay.map((row) => ({ label: row.date, value: row.count }))} />
+                <VolumeChart data={buildDailySeries(overview.volumeByDay, overview.rangeDays)} />
               )}
             </CardBody>
           </Card>
@@ -274,9 +296,63 @@ function StatTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-// Plain CSS width-percentage bars, not a charting dependency - this is
-// the first chart-shaped UI anywhere in the dashboard, and a handful of
-// horizontal bars don't justify a new dependency yet.
+// Hand-rolled SVG, not a charting dependency - a single line/area chart
+// doesn't justify one, matching the reasoning that already kept every
+// other primitive in this codebase (Tabs, Accordion, ConfirmDialog,
+// Toast) dependency-free. viewBox + preserveAspectRatio="none" lets it
+// stretch to fill its container responsively with no resize JS.
+function VolumeChart({ data }: { data: VolumeByDay[] }) {
+  const width = 600;
+  const height = 160;
+  const padding = { top: 8, right: 8, bottom: 20, left: 8 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const max = Math.max(...data.map((d) => d.count), 1);
+  const stepX = data.length > 1 ? innerWidth / (data.length - 1) : 0;
+
+  const points = data.map((d, i) => ({
+    x: padding.left + i * stepX,
+    y: padding.top + innerHeight - (d.count / max) * innerHeight,
+    ...d,
+  }));
+
+  const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const floor = padding.top + innerHeight;
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+  const areaPath =
+    firstPoint && lastPoint
+      ? `${linePath} L ${lastPoint.x.toFixed(1)} ${floor} L ${firstPoint.x.toFixed(1)} ${floor} Z`
+      : "";
+
+  const labelPoints = Array.from(new Set([0, Math.floor((points.length - 1) / 2), points.length - 1]))
+    .filter((i) => i >= 0)
+    .map((i) => points[i])
+    .filter((p) => p !== undefined);
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="h-40 w-full">
+        <path d={areaPath} className="fill-brand" fillOpacity={0.08} />
+        <path d={linePath} fill="none" className="stroke-brand" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+        {points.map((p) => (
+          <circle key={p.date} cx={p.x} cy={p.y} r={2.5} className="fill-brand">
+            <title>{`${formatChartDate(p.date)}: ${p.count}`}</title>
+          </circle>
+        ))}
+      </svg>
+      <div className="mt-1 flex justify-between text-xs text-slate-400">
+        {labelPoints.map((p) => (
+          <span key={p.date}>{formatChartDate(p.date)}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Plain CSS width-percentage bars, not a charting dependency - fine as-is
+// for categorical comparisons (status/escalation/CSAT breakdowns), which
+// is a genuinely correct chart shape for that data, not a placeholder.
 function BarList({ items }: { items: { label: string; value: number }[] }) {
   const max = Math.max(...items.map((item) => item.value), 1);
   return (
