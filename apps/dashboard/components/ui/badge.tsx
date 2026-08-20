@@ -5,10 +5,10 @@ export type BadgeTone = "neutral" | "success" | "danger" | "warning" | "info";
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
   neutral: "bg-slate-100 text-slate-600",
-  success: "bg-success-subtle text-emerald-700",
-  danger: "bg-danger-subtle text-red-700",
-  warning: "bg-warning-subtle text-amber-700",
-  info: "bg-info-subtle text-blue-700",
+  success: "bg-success-subtle text-success-text",
+  danger: "bg-danger-subtle text-danger-text",
+  warning: "bg-warning-subtle text-warning-text",
+  info: "bg-info-subtle text-info-text",
 };
 
 // The single status-color source of truth - the audit found this same

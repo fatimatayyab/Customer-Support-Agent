@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Button } from "./button";
 
 interface ConfirmDialogProps {
@@ -30,11 +31,29 @@ export function ConfirmDialog({
   busy = false,
   onConfirm,
 }: ConfirmDialogProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  // Escape and initial focus are the two things a keyboard-only user
+  // needs from a modal to not get stuck - this is the one true modal in
+  // the product, so it's worth the small dedicated effect rather than a
+  // general-purpose focus-trap dependency for a single call site.
+  useEffect(() => {
+    if (!open) return;
+    cancelRef.current?.focus();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) {
+        onOpenChange(false);
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, busy, onOpenChange]);
+
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={() => !busy && onOpenChange(false)}
     >
       <div
@@ -49,7 +68,7 @@ export function ConfirmDialog({
         </h2>
         {description && <p className="mt-1.5 text-sm text-slate-500">{description}</p>}
         <div className="mt-5 flex justify-end gap-2">
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => onOpenChange(false)}>
+          <Button ref={cancelRef} variant="outline" size="sm" disabled={busy} onClick={() => onOpenChange(false)}>
             {cancelLabel}
           </Button>
           <Button

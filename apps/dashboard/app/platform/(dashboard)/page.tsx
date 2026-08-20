@@ -10,6 +10,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/field";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
+import { PageSkeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { apiFetch, ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 
@@ -47,6 +49,7 @@ function formatRelativeTime(iso: string | null): string {
 
 export default function PlatformHome() {
   const router = useRouter();
+  const { showToast } = useToast();
   const [workspaces, setWorkspaces] = useState<WorkspaceRow[] | null>(null);
   const [invites, setInvites] = useState<WorkspaceInvite[] | null>(null);
   const [email, setEmail] = useState("");
@@ -141,10 +144,11 @@ export default function PlatformHome() {
 
   async function copyToClipboard(text: string) {
     await navigator.clipboard.writeText(text);
+    showToast("Copied to clipboard", "success");
   }
 
   if (!workspaces || !invites) {
-    return null;
+    return <PageSkeleton />;
   }
 
   const now = new Date();
@@ -178,52 +182,111 @@ export default function PlatformHome() {
             <CardBody className="text-sm text-slate-500">No workspaces yet.</CardBody>
           </Card>
         ) : (
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableHeaderCell>Workspace</TableHeaderCell>
-                <TableHeaderCell>Owner</TableHeaderCell>
-                <TableHeaderCell>Plan</TableHeaderCell>
-                <TableHeaderCell>Widget</TableHeaderCell>
-                <TableHeaderCell>Last activity</TableHeaderCell>
-                <TableHeaderCell>Status</TableHeaderCell>
-                <TableHeaderCell />
-              </TableRow>
-            </TableHead>
-            <TableBody>
+          <>
+            {/* Below md, the 7-column table only had room to show 2 columns
+                with no scroll affordance - Plan/Widget/Last activity/Status/
+                the Suspend action were all unreachable. A card list carries
+                the same data at any width instead of fighting a table
+                layout that doesn't fit. */}
+            <div className="flex flex-col gap-3 md:hidden">
               {workspaces.map((workspace) => (
-                <TableRow key={workspace.id}>
-                  <TableCell>
-                    <Link href={`/platform/workspaces/${workspace.id}`} className="font-medium text-slate-900 hover:underline">
-                      {workspace.name}
-                    </Link>
-                    <div className="text-xs text-slate-500">
-                      {workspace.slug} · {workspace.userCount} user{workspace.userCount === 1 ? "" : "s"}
+                <Card key={workspace.id} className="p-4">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <Link
+                        href={`/platform/workspaces/${workspace.id}`}
+                        className="font-medium text-slate-900 hover:underline"
+                      >
+                        {workspace.name}
+                      </Link>
+                      <div className="text-xs text-slate-500">
+                        {workspace.slug} · {workspace.userCount} user{workspace.userCount === 1 ? "" : "s"}
+                      </div>
                     </div>
-                  </TableCell>
-                  <TableCell>{workspace.ownerEmail ?? "no owner"}</TableCell>
-                  <TableCell>{workspace.plan ?? "no plan set"}</TableCell>
-                  <TableCell>{workspace.widgetConfigured ? "Configured" : "Not configured"}</TableCell>
-                  <TableCell>{formatRelativeTime(workspace.lastActivityAt)}</TableCell>
-                  <TableCell>
-                    <Badge tone={workspace.status === "active" ? "success" : "danger"}>{workspace.status}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <button
-                      onClick={() => handleToggleStatus(workspace)}
-                      disabled={actionBusy === workspace.id}
-                      className={cn(
-                        "hover:underline disabled:opacity-50",
-                        workspace.status === "active" ? "text-red-600" : "text-slate-600",
-                      )}
-                    >
-                      {workspace.status === "active" ? "Suspend" : "Reactivate"}
-                    </button>
-                  </TableCell>
-                </TableRow>
+                    <Badge tone={workspace.status === "active" ? "success" : "danger"} className="shrink-0">
+                      {workspace.status}
+                    </Badge>
+                  </div>
+                  <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
+                    <dt className="text-slate-500">Owner</dt>
+                    <dd className="truncate text-right text-slate-700">{workspace.ownerEmail ?? "no owner"}</dd>
+                    <dt className="text-slate-500">Plan</dt>
+                    <dd className="text-right text-slate-700">{workspace.plan ?? "no plan set"}</dd>
+                    <dt className="text-slate-500">Widget</dt>
+                    <dd className="text-right text-slate-700">
+                      {workspace.widgetConfigured ? "Configured" : "Not configured"}
+                    </dd>
+                    <dt className="text-slate-500">Last activity</dt>
+                    <dd className="text-right text-slate-700">{formatRelativeTime(workspace.lastActivityAt)}</dd>
+                  </dl>
+                  <button
+                    onClick={() => handleToggleStatus(workspace)}
+                    disabled={actionBusy === workspace.id}
+                    className={cn(
+                      "mt-3 w-full rounded-md border py-1.5 text-sm font-medium disabled:opacity-50",
+                      workspace.status === "active"
+                        ? "border-red-300 text-red-600"
+                        : "border-slate-300 text-slate-600",
+                    )}
+                  >
+                    {workspace.status === "active" ? "Suspend" : "Reactivate"}
+                  </button>
+                </Card>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+
+            <div className="hidden md:block">
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableHeaderCell>Workspace</TableHeaderCell>
+                    <TableHeaderCell>Owner</TableHeaderCell>
+                    <TableHeaderCell>Plan</TableHeaderCell>
+                    <TableHeaderCell>Widget</TableHeaderCell>
+                    <TableHeaderCell>Last activity</TableHeaderCell>
+                    <TableHeaderCell>Status</TableHeaderCell>
+                    <TableHeaderCell />
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {workspaces.map((workspace) => (
+                    <TableRow key={workspace.id}>
+                      <TableCell>
+                        <Link
+                          href={`/platform/workspaces/${workspace.id}`}
+                          className="font-medium text-slate-900 hover:underline"
+                        >
+                          {workspace.name}
+                        </Link>
+                        <div className="text-xs text-slate-500">
+                          {workspace.slug} · {workspace.userCount} user{workspace.userCount === 1 ? "" : "s"}
+                        </div>
+                      </TableCell>
+                      <TableCell>{workspace.ownerEmail ?? "no owner"}</TableCell>
+                      <TableCell>{workspace.plan ?? "no plan set"}</TableCell>
+                      <TableCell>{workspace.widgetConfigured ? "Configured" : "Not configured"}</TableCell>
+                      <TableCell>{formatRelativeTime(workspace.lastActivityAt)}</TableCell>
+                      <TableCell>
+                        <Badge tone={workspace.status === "active" ? "success" : "danger"}>{workspace.status}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <button
+                          onClick={() => handleToggleStatus(workspace)}
+                          disabled={actionBusy === workspace.id}
+                          className={cn(
+                            "hover:underline disabled:opacity-50",
+                            workspace.status === "active" ? "text-red-600" : "text-slate-600",
+                          )}
+                        >
+                          {workspace.status === "active" ? "Suspend" : "Reactivate"}
+                        </button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </section>
 

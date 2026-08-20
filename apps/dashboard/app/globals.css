@@ -3,14 +3,17 @@
 /*
  * Design tokens for the dashboard. Both shells (Workspace + Platform)
  * consume the same palette/radius/shadow scale — the only intentional
- * divergence is --accent, which each shell layout overrides locally
+ * divergence is the accent, which each shell layout applies locally
  * (see components/shell/*) so the two stay visually distinct without
  * forking the design system itself.
  *
- * --brand stays slate-900 deliberately: it's already the widget's
- * hardcoded default primaryColor fallback (apps/widget/src/widget.css),
- * so reusing it here is what makes the dashboard and the customer-facing
- * widget read as the same product instead of two unrelated ones.
+ * --brand stays slate-900 in LIGHT mode deliberately: it's already the
+ * widget's hardcoded default primaryColor fallback
+ * (apps/widget/src/widget.css), so reusing it here is what makes the
+ * dashboard and the customer-facing widget read as the same product.
+ * Dark mode breaks that link on purpose - see the dark block below for
+ * why a literal near-black button doesn't work once the page itself is
+ * near-black.
  */
 @theme {
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -23,12 +26,41 @@
 
   --color-success: var(--color-emerald-600);
   --color-success-subtle: var(--color-emerald-100);
+  --color-success-text: var(--color-emerald-700);
   --color-danger: var(--color-red-600);
   --color-danger-subtle: var(--color-red-100);
+  --color-danger-text: var(--color-red-700);
   --color-warning: var(--color-amber-600);
   --color-warning-subtle: var(--color-amber-100);
+  --color-warning-text: var(--color-amber-700);
   --color-info: var(--color-blue-600);
   --color-info-subtle: var(--color-blue-100);
+  --color-info-text: var(--color-blue-700);
+
+  /* --page is the page-background role split out of --color-slate-50
+     specifically - slate-50 is ALSO used everywhere else as a subtle
+     hover/fill tint, a role that needs to get LIGHTER in dark mode while
+     the page background needs to get DARKER. One Tailwind class can't
+     serve both directions at once; --page carries the page-background
+     role on its own so slate-50 is free to invert normally for its
+     (much more common) hover-tint role. */
+  --color-page: var(--color-slate-50);
+
+  /* A muted, theme-stable fill for the AI message bubble and its typing
+     indicator (conversations/[id]/page.tsx) - deliberately not
+     --color-slate-700, which is dominated by its far more common role as
+     BODY TEXT (23 uses) and needs to invert to a light color for that;
+     these two spots use slate-700 as a background fill instead, the
+     opposite direction. */
+  --color-fill-muted: var(--color-slate-700);
+
+  /* Text/dot color for anything sitting on a saturated fill (a brand or
+     destructive button, a colored avatar chip, the AI typing indicator's
+     dots) - always light, deliberately NOT tied to --color-white, which
+     dark mode repoints to a dark card surface. If these shared one
+     variable, inverting --color-white for card backgrounds would also
+     turn every button's label invisible. */
+  --color-on-fill: #ffffff;
 
   --shadow-elevation-sm: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 1px 0 rgb(15 23 42 / 0.03);
   --shadow-elevation-md: 0 4px 12px -2px rgb(15 23 42 / 0.08), 0 2px 4px -2px rgb(15 23 42 / 0.04);
@@ -36,4 +68,132 @@
 
 body {
   font-family: var(--font-sans);
+  background-color: var(--color-page);
+}
+
+/*
+ * Dark mode. Two triggers, same values: OS preference (only when the
+ * user hasn't made an explicit choice) and an explicit `data-theme`
+ * attribute set by the theme toggle (lib/theme.ts) and persisted to
+ * localStorage. The toggle always wins over OS preference once set.
+ *
+ * This redefines Tailwind's own palette variables (--color-slate-*,
+ * --color-white, --color-red-*, etc.) rather than adding `dark:` classes
+ * across every page - every existing bg-white/text-slate-900/
+ * border-slate-200 usage in the app picks up the new values automatically
+ * because Tailwind v4 utilities compile to `var(--color-*)` references.
+ * The only components touched directly were the handful with a genuine
+ * conflict: the same Tailwind class meaning two different things in two
+ * different places (see --page and --on-fill above, and --brand below).
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-white: #111827;
+    --color-page: #05070c;
+
+    --color-slate-50: #1b2536;
+    --color-slate-100: #232f44;
+    --color-slate-200: #2f3d54;
+    --color-slate-300: #47576f;
+    --color-slate-400: #7386a0;
+    --color-slate-500: #93a4bd;
+    --color-slate-600: #aebbcf;
+    --color-slate-700: #cdd7e6;
+    --color-slate-900: #f3f6fb;
+
+    --color-brand: #4c8dff;
+    --color-brand-hover: #6ea0ff;
+    --color-accent-workspace: #4c8dff;
+    --color-fill-muted: #3b4a63;
+
+    --color-success: #34d399;
+    --color-success-subtle: #113828;
+    --color-success-text: #6ee7b7;
+    --color-danger: #f87171;
+    --color-danger-subtle: #451c1c;
+    --color-danger-text: #fca5a5;
+    --color-warning: #fbbf24;
+    --color-warning-subtle: #452e0e;
+    --color-warning-text: #fcd34d;
+    --color-info: #60a5fa;
+    --color-info-subtle: #17304f;
+    --color-info-text: #93c5fd;
+
+    --color-red-50: #2a1414;
+    --color-red-100: #3a1a1a;
+    --color-red-200: #4c2222;
+    --color-red-300: #6b2c2c;
+    --color-red-500: #f87171;
+    --color-red-600: #ef4444;
+    --color-red-700: #fca5a5;
+
+    --color-amber-50: #2b2210;
+    --color-amber-200: #4a3a15;
+    --color-amber-300: #6b5518;
+    --color-amber-600: #fbbf24;
+    --color-amber-700: #fcd34d;
+    --color-amber-800: #fde68a;
+
+    --color-emerald-200: #145c3f;
+    --color-emerald-500: #34d399;
+    --color-emerald-700: #6ee7b7;
+
+    --shadow-elevation-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 1px 0 rgb(0 0 0 / 0.2);
+    --shadow-elevation-md: 0 4px 12px -2px rgb(0 0 0 / 0.45), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-white: #111827;
+  --color-page: #05070c;
+
+  --color-slate-50: #1b2536;
+  --color-slate-100: #232f44;
+  --color-slate-200: #2f3d54;
+  --color-slate-300: #47576f;
+  --color-slate-400: #7386a0;
+  --color-slate-500: #93a4bd;
+  --color-slate-600: #aebbcf;
+  --color-slate-700: #cdd7e6;
+  --color-slate-900: #f3f6fb;
+
+  --color-brand: #4c8dff;
+  --color-brand-hover: #6ea0ff;
+  --color-accent-workspace: #4c8dff;
+  --color-fill-muted: #3b4a63;
+
+  --color-success: #34d399;
+  --color-success-subtle: #113828;
+  --color-success-text: #6ee7b7;
+  --color-danger: #f87171;
+  --color-danger-subtle: #451c1c;
+  --color-danger-text: #fca5a5;
+  --color-warning: #fbbf24;
+  --color-warning-subtle: #452e0e;
+  --color-warning-text: #fcd34d;
+  --color-info: #60a5fa;
+  --color-info-subtle: #17304f;
+  --color-info-text: #93c5fd;
+
+  --color-red-50: #2a1414;
+  --color-red-100: #3a1a1a;
+  --color-red-200: #4c2222;
+  --color-red-300: #6b2c2c;
+  --color-red-500: #f87171;
+  --color-red-600: #ef4444;
+  --color-red-700: #fca5a5;
+
+  --color-amber-50: #2b2210;
+  --color-amber-200: #4a3a15;
+  --color-amber-300: #6b5518;
+  --color-amber-600: #fbbf24;
+  --color-amber-700: #fcd34d;
+  --color-amber-800: #fde68a;
+
+  --color-emerald-200: #145c3f;
+  --color-emerald-500: #34d399;
+  --color-emerald-700: #6ee7b7;
+
+  --shadow-elevation-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 1px 0 rgb(0 0 0 / 0.2);
+  --shadow-elevation-md: 0 4px 12px -2px rgb(0 0 0 / 0.45), 0 2px 4px -2px rgb(0 0 0 / 0.3);
 }

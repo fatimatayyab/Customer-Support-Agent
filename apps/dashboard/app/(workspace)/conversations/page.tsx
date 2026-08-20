@@ -109,7 +109,7 @@ export default function ConversationsPage() {
             key={option}
             onClick={() => setTab(option)}
             className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
-              tab === option ? "bg-brand text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              tab === option ? "bg-brand text-on-fill" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
             {TAB_LABELS[option]}

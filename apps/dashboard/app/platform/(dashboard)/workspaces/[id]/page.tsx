@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input, Textarea } from "@/components/ui/field";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageSkeleton } from "@/components/ui/skeleton";
 import { ApiError, apiFetch } from "@/lib/api";
 
 interface Workspace {
@@ -186,7 +187,7 @@ export default function PlatformWorkspaceDetailPage() {
   }
 
   if (!detail) {
-    return null;
+    return <PageSkeleton />;
   }
 
   const { workspace, users, auditLog, usage, apiKeys } = detail;

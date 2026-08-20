@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input, Select } from "@/components/ui/field";
 import { PageSkeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session-context";
 
@@ -40,6 +41,7 @@ const ROLE_LABELS: Record<Role, string> = {
 export default function TeamPage() {
   const router = useRouter();
   const { user: sessionUser } = useSession();
+  const { showToast } = useToast();
   const [members, setMembers] = useState<Member[] | null>(null);
   const [invitations, setInvitations] = useState<Invitation[] | null>(null);
   const [email, setEmail] = useState("");
@@ -122,6 +124,7 @@ export default function TeamPage() {
 
   async function copyToClipboard(text: string) {
     await navigator.clipboard.writeText(text);
+    showToast("Copied to clipboard", "success");
   }
 
   if (!members || !invitations) {

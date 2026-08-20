@@ -3,6 +3,7 @@
 import { BarChart3, BookOpen, Code2, LayoutDashboard, MessageSquare, Plug, Users, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -60,6 +61,15 @@ export function WorkspaceSidebar({
   mobileOpen: boolean;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    if (!mobileOpen) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mobileOpen, onClose]);
+
   return (
     <>
       {/* Desktop: always visible, fixed width, part of the flex layout. */}
@@ -71,7 +81,7 @@ export function WorkspaceSidebar({
       {/* Mobile: slide-over drawer behind a backdrop, toggled by the topbar hamburger. */}
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
-          <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
+          <div className="absolute inset-0 bg-black/40" onClick={onClose} />
           <aside className="relative flex h-full w-64 flex-col bg-white py-4 shadow-elevation-md">
             <div className="mb-2 flex items-center justify-between px-4">
               <span className="text-sm font-semibold text-slate-900">{workspaceName}</span>

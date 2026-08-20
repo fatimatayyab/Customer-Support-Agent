@@ -105,7 +105,7 @@ function MessageBubble({ message }: { message: WireMessage }) {
         className={cn(
           "max-w-[80%] rounded-2xl px-3 py-2 text-sm break-words",
           outbound
-            ? cn("rounded-br-sm text-white", isAutomated ? "bg-slate-700" : "bg-brand")
+            ? cn("rounded-br-sm text-on-fill", isAutomated ? "bg-fill-muted" : "bg-brand")
             : "rounded-bl-sm bg-slate-100 text-slate-900",
         )}
       >
@@ -417,10 +417,10 @@ export default function ConversationDetailPage() {
               <MessageBubble key={message.id} message={message} />
             ))}
             {typing && (
-              <div className="flex items-center gap-1 self-end rounded-2xl rounded-br-sm bg-slate-700 px-3 py-2">
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/70 [animation-delay:-0.3s]" />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/70 [animation-delay:-0.15s]" />
-                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-white/70" />
+              <div className="flex items-center gap-1 self-end rounded-2xl rounded-br-sm bg-fill-muted px-3 py-2">
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-fill/70 [animation-delay:-0.3s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-fill/70 [animation-delay:-0.15s]" />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-on-fill/70" />
               </div>
             )}
           </div>

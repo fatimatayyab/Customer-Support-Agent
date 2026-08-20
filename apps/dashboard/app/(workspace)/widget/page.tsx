@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input, Select, Textarea } from "@/components/ui/field";
 import { PageSkeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { useSession } from "@/lib/session-context";
 import { ApiError, apiFetch } from "@/lib/api";
 
@@ -77,6 +78,7 @@ function formatRelativeTime(iso: string | null): string {
 export default function WidgetPage() {
   const router = useRouter();
   const { user: sessionUser } = useSession();
+  const { showToast } = useToast();
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[] | null>(null);
   // hasEverProvisioned distinguishes "never installed" (auto-provision a
   // default) from "installed once, then explicitly removed" (don't
@@ -213,6 +215,7 @@ export default function WidgetPage() {
 
   async function copyToClipboard(text: string) {
     await navigator.clipboard.writeText(text);
+    showToast("Copied to clipboard", "success");
   }
 
   // Handles rotation for BOTH the Install section's primary button and

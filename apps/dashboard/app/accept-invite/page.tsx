@@ -5,6 +5,7 @@ import { type FormEvent, Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { InlineError } from "@/components/ui/error-state";
 import { Field, Input } from "@/components/ui/field";
+import { PageSkeleton } from "@/components/ui/skeleton";
 import { ApiError, apiFetch } from "@/lib/api";
 
 interface InvitationPreview {
@@ -66,7 +67,7 @@ function AcceptInviteForm() {
   }
 
   if (!preview) {
-    return null;
+    return <PageSkeleton />;
   }
 
   return (
