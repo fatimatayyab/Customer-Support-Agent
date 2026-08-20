@@ -6,8 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import type { BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/field";
+import { PageSkeleton } from "@/components/ui/skeleton";
 import { apiFetch, ApiError } from "@/lib/api";
 
 interface Integration {
@@ -30,6 +32,8 @@ export default function IntegrationsPage() {
   const [accessToken, setAccessToken] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [disconnectTarget, setDisconnectTarget] = useState<Integration | null>(null);
+  const [disconnectBusy, setDisconnectBusy] = useState(false);
 
   async function refresh() {
     const data = await apiFetch<{ integrations: Integration[] }>("/integrations");
@@ -59,13 +63,19 @@ export default function IntegrationsPage() {
     }
   }
 
-  async function handleDisconnect(id: string) {
-    await apiFetch(`/integrations/${id}`, { method: "DELETE" });
-    await refresh();
+  async function performDisconnect(id: string) {
+    setDisconnectBusy(true);
+    try {
+      await apiFetch(`/integrations/${id}`, { method: "DELETE" });
+      await refresh();
+    } finally {
+      setDisconnectBusy(false);
+      setDisconnectTarget(null);
+    }
   }
 
   if (!integrations) {
-    return null;
+    return <PageSkeleton />;
   }
 
   const hubspot = integrations.find((integration) => integration.provider === "hubspot");
@@ -85,7 +95,7 @@ export default function IntegrationsPage() {
                   <span className="text-slate-500">verified {new Date(hubspot.lastVerifiedAt).toLocaleString()}</span>
                 )}
               </div>
-              <button onClick={() => handleDisconnect(hubspot.id)} className="text-sm text-red-600 hover:underline">
+              <button onClick={() => setDisconnectTarget(hubspot)} className="text-sm text-red-600 hover:underline">
                 Disconnect
               </button>
             </div>
@@ -117,6 +127,16 @@ export default function IntegrationsPage() {
           )}
         </CardBody>
       </Card>
+
+      <ConfirmDialog
+        open={disconnectTarget !== null}
+        onOpenChange={(open) => !open && setDisconnectTarget(null)}
+        title="Disconnect HubSpot?"
+        description="Contact lookups from conversations will stop working until you reconnect with a new access token."
+        confirmLabel="Disconnect"
+        busy={disconnectBusy}
+        onConfirm={() => disconnectTarget && performDisconnect(disconnectTarget.id)}
+      />
     </div>
   );
 }

@@ -4,8 +4,10 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input, Select } from "@/components/ui/field";
+import { PageSkeleton } from "@/components/ui/skeleton";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session-context";
 
@@ -47,6 +49,7 @@ export default function TeamPage() {
   const [revealedInviteUrl, setRevealedInviteUrl] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<Invitation | null>(null);
 
   async function refresh() {
     const [membersData, invitationsData] = await Promise.all([
@@ -103,7 +106,7 @@ export default function TeamPage() {
     }
   }
 
-  async function handleRevoke(id: string) {
+  async function performRevoke(id: string) {
     setActionBusy(true);
     setActionError(null);
     try {
@@ -113,6 +116,7 @@ export default function TeamPage() {
       setActionError(err instanceof ApiError ? err.message : "Could not revoke the invitation.");
     } finally {
       setActionBusy(false);
+      setRevokeTarget(null);
     }
   }
 
@@ -121,7 +125,7 @@ export default function TeamPage() {
   }
 
   if (!members || !invitations) {
-    return null;
+    return <PageSkeleton />;
   }
 
   const canInviteOwner = sessionUser.role === "owner";
@@ -170,7 +174,7 @@ export default function TeamPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => handleRevoke(invitation.id)}
+                    onClick={() => setRevokeTarget(invitation)}
                     disabled={actionBusy}
                     className="text-sm text-red-600 hover:underline disabled:opacity-50"
                   >
@@ -217,6 +221,16 @@ export default function TeamPage() {
           {inviteError && <InlineError message={inviteError} />}
         </CardBody>
       </Card>
+
+      <ConfirmDialog
+        open={revokeTarget !== null}
+        onOpenChange={(open) => !open && setRevokeTarget(null)}
+        title="Revoke this invitation?"
+        description={`${revokeTarget?.email} won't be able to use it to join anymore.`}
+        confirmLabel="Revoke invitation"
+        busy={actionBusy}
+        onConfirm={() => revokeTarget && performRevoke(revokeTarget.id)}
+      />
     </div>
   );
 }

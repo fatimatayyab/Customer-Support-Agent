@@ -6,8 +6,10 @@ import { Accordion } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input, Select, Textarea } from "@/components/ui/field";
+import { PageSkeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/lib/session-context";
 import { ApiError, apiFetch } from "@/lib/api";
 
@@ -100,6 +102,7 @@ export default function WidgetPage() {
   const [newSiteDomains, setNewSiteDomains] = useState("");
   const [advancedError, setAdvancedError] = useState<string | null>(null);
   const [advancedBusy, setAdvancedBusy] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<ApiKeySummary | null>(null);
 
   const [assistantName, setAssistantName] = useState("");
   const [greetingMessage, setGreetingMessage] = useState("");
@@ -270,7 +273,7 @@ export default function WidgetPage() {
     }
   }
 
-  async function handleRevoke(id: string) {
+  async function performRemove(id: string) {
     setAdvancedBusy(id);
     setAdvancedError(null);
     try {
@@ -292,11 +295,12 @@ export default function WidgetPage() {
       setAdvancedError(err instanceof ApiError ? err.message : "Could not remove this site.");
     } finally {
       setAdvancedBusy(null);
+      setRemoveTarget(null);
     }
   }
 
   if (apiKeys === null) {
-    return null;
+    return <PageSkeleton />;
   }
 
   // The primary/default install. Prefer matching by name over "oldest
@@ -532,7 +536,7 @@ export default function WidgetPage() {
                       Rotate
                     </button>
                     <button
-                      onClick={() => handleRevoke(key.id)}
+                      onClick={() => setRemoveTarget(key)}
                       disabled={advancedBusy === key.id}
                       className="text-red-600 hover:underline disabled:opacity-50"
                     >
@@ -605,6 +609,20 @@ export default function WidgetPage() {
           </form>
         )}
       </Accordion>
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => !open && setRemoveTarget(null)}
+        title={`Remove "${removeTarget?.name}"?`}
+        description={
+          removeTarget?.id === primary?.id
+            ? "This is your only install code - removing it turns your assistant off on every site until you create a new one."
+            : "This site's code stops working immediately. This can't be undone - a new code would need to be issued instead."
+        }
+        confirmLabel="Remove site"
+        busy={removeTarget !== null && advancedBusy === removeTarget.id}
+        onConfirm={() => removeTarget && performRemove(removeTarget.id)}
+      />
     </div>
   );
 }

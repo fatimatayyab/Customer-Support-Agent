@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import type { BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { InlineError } from "@/components/ui/error-state";
 import { Input, Textarea } from "@/components/ui/field";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -61,6 +62,9 @@ export default function KnowledgePage() {
   const [addingWebsites, setAddingWebsites] = useState(false);
   const [websiteError, setWebsiteError] = useState<string | null>(null);
   const [websiteSkipped, setWebsiteSkipped] = useState<string[]>([]);
+
+  const [deleteTarget, setDeleteTarget] = useState<KnowledgeSource | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   async function refreshSources() {
     const data = await apiFetch<{ sources: KnowledgeSource[] }>("/knowledge/sources");
@@ -157,9 +161,15 @@ export default function KnowledgePage() {
     }
   }
 
-  async function handleDelete(id: string) {
-    await apiFetch(`/knowledge/sources/${id}`, { method: "DELETE" });
-    await refreshSources();
+  async function performDelete(id: string) {
+    setDeleteBusy(true);
+    try {
+      await apiFetch(`/knowledge/sources/${id}`, { method: "DELETE" });
+      await refreshSources();
+    } finally {
+      setDeleteBusy(false);
+      setDeleteTarget(null);
+    }
   }
 
   async function handleSearch(event: FormEvent) {
@@ -213,7 +223,7 @@ export default function KnowledgePage() {
                     </div>
                     {source.sourceLocation && <div className="mt-0.5 text-xs text-slate-400">{source.sourceLocation}</div>}
                   </div>
-                  <button onClick={() => handleDelete(source.id)} className="shrink-0 text-sm text-red-600 hover:underline">
+                  <button onClick={() => setDeleteTarget(source)} className="shrink-0 text-sm text-red-600 hover:underline">
                     Delete
                   </button>
                 </li>
@@ -304,6 +314,16 @@ export default function KnowledgePage() {
           )}
         </CardBody>
       </Card>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={`Delete "${deleteTarget?.title}"?`}
+        description="Your assistant will no longer be able to reference this source. This can't be undone."
+        confirmLabel="Delete source"
+        busy={deleteBusy}
+        onConfirm={() => deleteTarget && performDelete(deleteTarget.id)}
+      />
     </div>
   );
 }
