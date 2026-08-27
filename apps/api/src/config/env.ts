@@ -45,6 +45,11 @@ const envSchema = z.object({
   AIRTABLE_API_KEY: z.string().optional(),
   AIRTABLE_BASE_ID: z.string().optional(),
   AIRTABLE_TABLE_NAME: z.string().optional(),
+  // Optional, same "fails gracefully but visibly" precedent as
+  // VOYAGE_API_KEY/AIRTABLE_* above - without it, error-handler.ts's
+  // catch-all branch still logs via Pino exactly as it does today, it
+  // just has nowhere else to also report to.
+  SENTRY_DSN: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

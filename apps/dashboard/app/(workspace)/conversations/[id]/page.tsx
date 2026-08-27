@@ -199,7 +199,6 @@ export default function ConversationDetailPage() {
       unsubscribe();
       connection.close();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
   useEffect(() => {

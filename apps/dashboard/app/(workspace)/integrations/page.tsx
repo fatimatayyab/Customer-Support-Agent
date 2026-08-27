@@ -18,6 +18,7 @@ interface Integration {
   status: "connected" | "error" | "disconnected";
   lastVerifiedAt: string | null;
   createdAt: string;
+  aiToolCallingEnabled: boolean;
 }
 
 const STATUS_TONES: Record<Integration["status"], BadgeTone> = {
@@ -34,6 +35,7 @@ export default function IntegrationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [disconnectTarget, setDisconnectTarget] = useState<Integration | null>(null);
   const [disconnectBusy, setDisconnectBusy] = useState(false);
+  const [toolCallingBusy, setToolCallingBusy] = useState(false);
 
   async function refresh() {
     const data = await apiFetch<{ integrations: Integration[] }>("/integrations");
@@ -74,6 +76,22 @@ export default function IntegrationsPage() {
     }
   }
 
+  async function handleToggleAiToolCalling(id: string, enabled: boolean) {
+    setToolCallingBusy(true);
+    setError(null);
+    try {
+      await apiFetch(`/integrations/${id}/ai-tool-calling`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not update this setting.");
+    } finally {
+      setToolCallingBusy(false);
+    }
+  }
+
   if (!integrations) {
     return <PageSkeleton />;
   }
@@ -88,16 +106,37 @@ export default function IntegrationsPage() {
         <CardHeader title="HubSpot" />
         <CardBody>
           {hubspot ? (
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2">
-                <Badge tone={STATUS_TONES[hubspot.status]}>{hubspot.status}</Badge>
-                {hubspot.lastVerifiedAt && (
-                  <span className="text-slate-500">verified {new Date(hubspot.lastVerifiedAt).toLocaleString()}</span>
-                )}
+            <div className="flex flex-col gap-4 text-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Badge tone={STATUS_TONES[hubspot.status]}>{hubspot.status}</Badge>
+                  {hubspot.lastVerifiedAt && (
+                    <span className="text-slate-500">verified {new Date(hubspot.lastVerifiedAt).toLocaleString()}</span>
+                  )}
+                </div>
+                <button onClick={() => setDisconnectTarget(hubspot)} className="text-sm text-red-600 hover:underline">
+                  Disconnect
+                </button>
               </div>
-              <button onClick={() => setDisconnectTarget(hubspot)} className="text-sm text-red-600 hover:underline">
-                Disconnect
-              </button>
+
+              <label className="flex items-start gap-3 rounded-md border border-slate-200 p-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={hubspot.aiToolCallingEnabled}
+                  disabled={toolCallingBusy}
+                  onChange={(event) => handleToggleAiToolCalling(hubspot.id, event.target.checked)}
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="font-medium text-slate-900">Let the AI look up a customer&apos;s contact record</span>
+                  <span className="text-slate-500">
+                    When a customer asks about their own account identity or status and shares their email, the AI may
+                    look it up in HubSpot before replying. Off by default.
+                  </span>
+                </span>
+              </label>
+
+              {error && <InlineError message={error} />}
             </div>
           ) : (
             <form onSubmit={handleConnect} className="flex flex-col gap-2">

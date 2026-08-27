@@ -26,6 +26,13 @@ export interface MessageMetadata {
   // context, not assumed present for every message/channel).
   pageUrl?: string;
   pageTitle?: string;
+  // Populated only on an 'ai' message that used the bounded tool-call
+  // flow (Support Orchestrator Stage 1) - reused jsonb metadata, same
+  // reasoning as escalated/escalationReason, rather than a new Postgres
+  // enum for a single-tool feature (see conversation-escalations.ts's
+  // own comment on why EscalationReason itself isn't a DB enum).
+  toolAttempted?: "lookup_contact";
+  toolOutcome?: "found" | "not_found" | "error";
 }
 
 type NewMessage = Pick<

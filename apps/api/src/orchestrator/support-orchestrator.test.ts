@@ -300,6 +300,295 @@ describe("handleCustomerMessage", () => {
     expect(messages.some((message) => message.senderType === "system")).toBe(true);
   });
 
+  describe("Stage 1: AI-triggered lookup_contact eligibility gate", () => {
+    async function connectFakeIntegration(workspaceId: string, config: Record<string, unknown> = {}) {
+      const credentials = await encryptCredentials({ accessToken: "fake-token" });
+      return withWorkspaceContext(workspaceId, (scopedDb) =>
+        upsertIntegration(scopedDb, { workspaceId, provider: "hubspot", credentials, config }),
+      );
+    }
+
+    it("still escalates via no_relevant_knowledge for an unrelated message, even with a connected+enabled integration", async () => {
+      const workspace = await createWorkspace();
+      const conversation = await createConversation(workspace.id);
+      await connectFakeIntegration(workspace.id, { aiToolCallingEnabled: true });
+      const aiProvider = new FakeAiProvider();
+
+      await handleCustomerMessage(
+        { workspaceId: workspace.id, conversationId: conversation.id, content: "what's the weather like today?" },
+        { jobRunner: new SynchronousJobRunner(), aiProvider, embeddingProvider: new FakeEmbeddingProvider() },
+      );
+
+      const conversationAfter = await withWorkspaceContext(workspace.id, (scopedDb) =>
+        getConversationById(scopedDb, workspace.id, conversation.id),
+      );
+      const metadata = conversationAfter?.metadata as { escalation?: { reason: string } } | null;
+      expect(metadata?.escalation?.reason).toBe("no_relevant_knowledge");
+      // The core behavior this gate exists for: a connected+enabled
+      // integration must not, by itself, get an unrelated question past
+      // the model-never-called fast path.
+      expect(aiProvider.generateReplyInputs).toHaveLength(0);
+    });
+
+    it("keeps the toggle-off fast path unchanged even for an otherwise-eligible-looking message", async () => {
+      const workspace = await createWorkspace();
+      const conversation = await createConversation(workspace.id);
+      await connectFakeIntegration(workspace.id); // aiToolCallingEnabled left off (default)
+      const aiProvider = new FakeAiProvider();
+
+      await handleCustomerMessage(
+        {
+          workspaceId: workspace.id,
+          conversationId: conversation.id,
+          content: "Am I an existing customer? My email is jane@example.com",
+        },
+        { jobRunner: new SynchronousJobRunner(), aiProvider, embeddingProvider: new FakeEmbeddingProvider() },
+      );
+
+      const conversationAfter = await withWorkspaceContext(workspace.id, (scopedDb) =>
+        getConversationById(scopedDb, workspace.id, conversation.id),
+      );
+      const metadata = conversationAfter?.metadata as { escalation?: { reason: string } } | null;
+      expect(metadata?.escalation?.reason).toBe("no_relevant_knowledge");
+      expect(aiProvider.generateReplyInputs).toHaveLength(0);
+    });
+
+    it("completes the bounded two-call flow and records the tool attempt when eligible and authorized", async () => {
+      const workspace = await createWorkspace();
+      const conversation = await createConversation(workspace.id);
+      await connectFakeIntegration(workspace.id, { aiToolCallingEnabled: true });
+      const integrationProvider = new FakeIntegrationProvider().mockFound({
+        name: "Jane Doe",
+        email: "jane@example.com",
+        company: "Acme Co",
+        lifecycleStage: "customer",
+      });
+      const aiProvider = new FakeAiProvider()
+        .queueReply({
+          kind: "tool_call",
+          tool: "lookup_contact",
+          args: { email: "jane@example.com" },
+          provider: "fake",
+          model: "fake-model",
+          promptVersion: 1,
+          usage: { inputTokens: 10, outputTokens: 10 },
+        })
+        .queueReply({
+          kind: "reply",
+          reply: "Yes, I found your account, Jane.",
+          confidence: 0.9,
+          needsEscalation: false,
+          citations: [],
+          provider: "fake",
+          model: "fake-model",
+          promptVersion: 1,
+          usage: { inputTokens: 10, outputTokens: 10 },
+          finishReason: "stop",
+        });
+
+      await handleCustomerMessage(
+        {
+          workspaceId: workspace.id,
+          conversationId: conversation.id,
+          content: "Am I an existing customer? My email is jane@example.com",
+        },
+        {
+          jobRunner: new SynchronousJobRunner(),
+          aiProvider,
+          embeddingProvider: new FakeEmbeddingProvider(),
+          integrationProviderFactory: fakeIntegrationProviderFactory(integrationProvider),
+        },
+      );
+
+      expect(integrationProvider.calls).toEqual([{ email: "jane@example.com" }]);
+
+      const messages = await withWorkspaceContext(workspace.id, (scopedDb) =>
+        listMessages(scopedDb, workspace.id, conversation.id),
+      );
+      const aiMessage = messages.find((message) => message.senderType === "ai");
+      const metadata = aiMessage?.metadata as { toolAttempted?: string; toolOutcome?: string } | null;
+      expect(metadata?.toolAttempted).toBe("lookup_contact");
+      expect(metadata?.toolOutcome).toBe("found");
+
+      const logs = await withWorkspaceContext(workspace.id, (scopedDb) =>
+        scopedDb.select().from(integrationActionLogs).where(eq(integrationActionLogs.workspaceId, workspace.id)),
+      );
+      expect(logs).toHaveLength(1);
+      expect(logs[0]?.triggeredBy).toBe("ai");
+      expect(logs[0]?.triggeredByUserId).toBeNull();
+
+      // conversation_notes.userId is NOT NULL and there is no human
+      // author for an AI-triggered lookup - deliberately no note.
+      const notes = await withWorkspaceContext(workspace.id, (scopedDb) =>
+        listConversationNotes(scopedDb, workspace.id, conversation.id),
+      );
+      expect(notes).toHaveLength(0);
+    });
+
+    it("never executes the lookup when the model requests an email the customer never actually typed, and falls back deterministically since there's no other grounding", async () => {
+      const workspace = await createWorkspace();
+      const conversation = await createConversation(workspace.id);
+      await connectFakeIntegration(workspace.id, { aiToolCallingEnabled: true });
+      const integrationProvider = new FakeIntegrationProvider().mockFound({ email: "someone-else@example.com" });
+      const aiProvider = new FakeAiProvider().queueReply({
+        kind: "tool_call",
+        tool: "lookup_contact",
+        // Not the email the customer supplied below - simulates a
+        // hallucinated or knowledge-injected email.
+        args: { email: "someone-else@example.com" },
+        provider: "fake",
+        model: "fake-model",
+        promptVersion: 1,
+        usage: { inputTokens: 10, outputTokens: 10 },
+      });
+      // No second queued reply: with zero knowledge chunks and a
+      // rejected email, the deterministic no-grounding fallback fires
+      // without ever making the forced second call.
+
+      await handleCustomerMessage(
+        {
+          workspaceId: workspace.id,
+          conversationId: conversation.id,
+          content: "Am I an existing customer? My email is jane@example.com",
+        },
+        {
+          jobRunner: new SynchronousJobRunner(),
+          aiProvider,
+          embeddingProvider: new FakeEmbeddingProvider(),
+          integrationProviderFactory: fakeIntegrationProviderFactory(integrationProvider),
+        },
+      );
+
+      expect(integrationProvider.calls).toHaveLength(0);
+      expect(aiProvider.generateReplyInputs).toHaveLength(1);
+
+      const conversationAfter = await withWorkspaceContext(workspace.id, (scopedDb) =>
+        getConversationById(scopedDb, workspace.id, conversation.id),
+      );
+      const conversationMetadata = conversationAfter?.metadata as { escalation?: { reason: string } } | null;
+      expect(conversationMetadata?.escalation?.reason).toBe("no_relevant_knowledge");
+
+      const messages = await withWorkspaceContext(workspace.id, (scopedDb) =>
+        listMessages(scopedDb, workspace.id, conversation.id),
+      );
+      expect(messages.some((message) => message.senderType === "ai")).toBe(false);
+      expect(messages.some((message) => message.senderType === "system")).toBe(true);
+
+      const logs = await withWorkspaceContext(workspace.id, (scopedDb) =>
+        scopedDb.select().from(integrationActionLogs).where(eq(integrationActionLogs.workspaceId, workspace.id)),
+      );
+      expect(logs).toHaveLength(0);
+    });
+
+    it("recognizes eligibility across two turns - an account question, then a later bare-email reply", async () => {
+      const workspace = await createWorkspace();
+      const conversation = await createConversation(workspace.id);
+      await connectFakeIntegration(workspace.id, { aiToolCallingEnabled: true });
+      const integrationProvider = new FakeIntegrationProvider().mockFound({ email: "jane@example.com" });
+
+      // Turn 1: an account question with no email yet - not eligible
+      // (hasIdentifiableEmail fails), falls through to the same
+      // deterministic no-knowledge escalation as before this feature
+      // existed.
+      const aiProviderTurn1 = new FakeAiProvider();
+      await handleCustomerMessage(
+        { workspaceId: workspace.id, conversationId: conversation.id, content: "Am I an existing customer?" },
+        {
+          jobRunner: new SynchronousJobRunner(),
+          aiProvider: aiProviderTurn1,
+          embeddingProvider: new FakeEmbeddingProvider(),
+        },
+      );
+      expect(aiProviderTurn1.generateReplyInputs).toHaveLength(0);
+
+      // Turn 2: customer replies with just the email. This message
+      // alone doesn't look like an account question, but turn 1's
+      // question is still one turn back in history - the gate must
+      // check the conversation, not only the latest message, or this
+      // natural two-turn flow never becomes eligible.
+      const aiProviderTurn2 = new FakeAiProvider()
+        .queueReply({
+          kind: "tool_call",
+          tool: "lookup_contact",
+          args: { email: "jane@example.com" },
+          provider: "fake",
+          model: "fake-model",
+          promptVersion: 1,
+          usage: { inputTokens: 10, outputTokens: 10 },
+        })
+        .queueReply({
+          kind: "reply",
+          reply: "Yes, I found your account.",
+          confidence: 0.9,
+          needsEscalation: false,
+          citations: [],
+          provider: "fake",
+          model: "fake-model",
+          promptVersion: 1,
+          usage: { inputTokens: 10, outputTokens: 10 },
+          finishReason: "stop",
+        });
+
+      await handleCustomerMessage(
+        { workspaceId: workspace.id, conversationId: conversation.id, content: "jane@example.com" },
+        {
+          jobRunner: new SynchronousJobRunner(),
+          aiProvider: aiProviderTurn2,
+          embeddingProvider: new FakeEmbeddingProvider(),
+          integrationProviderFactory: fakeIntegrationProviderFactory(integrationProvider),
+        },
+      );
+
+      expect(integrationProvider.calls).toEqual([{ email: "jane@example.com" }]);
+    });
+
+    it("forces deterministic escalation when there is no grounding at all, even if the model itself doesn't ask to escalate", async () => {
+      const workspace = await createWorkspace();
+      const conversation = await createConversation(workspace.id);
+      await connectFakeIntegration(workspace.id, { aiToolCallingEnabled: true });
+      const integrationProvider = new FakeIntegrationProvider().mockError(new Error("HubSpot is down"));
+      // Deliberately overconfident and non-escalating on the first (and
+      // only, since the failed lookup + zero knowledge chunks means the
+      // second call is skipped) call - proves the fallback below doesn't
+      // depend on the model's own judgment.
+      const aiProvider = new FakeAiProvider().queueReply({
+        kind: "tool_call",
+        tool: "lookup_contact",
+        args: { email: "jane@example.com" },
+        provider: "fake",
+        model: "fake-model",
+        promptVersion: 1,
+        usage: { inputTokens: 10, outputTokens: 10 },
+      });
+
+      await handleCustomerMessage(
+        {
+          workspaceId: workspace.id,
+          conversationId: conversation.id,
+          content: "Am I an existing customer? My email is jane@example.com",
+        },
+        {
+          jobRunner: new SynchronousJobRunner(),
+          aiProvider,
+          embeddingProvider: new FakeEmbeddingProvider(),
+          integrationProviderFactory: fakeIntegrationProviderFactory(integrationProvider),
+        },
+      );
+
+      const conversationAfter = await withWorkspaceContext(workspace.id, (scopedDb) =>
+        getConversationById(scopedDb, workspace.id, conversation.id),
+      );
+      const metadata = conversationAfter?.metadata as { escalation?: { reason: string } } | null;
+      expect(metadata?.escalation?.reason).toBe("no_relevant_knowledge");
+
+      const messages = await withWorkspaceContext(workspace.id, (scopedDb) =>
+        listMessages(scopedDb, workspace.id, conversation.id),
+      );
+      expect(messages.some((message) => message.senderType === "ai")).toBe(false);
+      expect(messages.some((message) => message.senderType === "system")).toBe(true);
+    });
+  });
+
   it("replies and does not escalate when the AI is confident and grounded", async () => {
     const workspace = await createWorkspace();
     const conversation = await createConversation(workspace.id);
@@ -700,9 +989,13 @@ describe("lookupContact", () => {
     await connectFakeIntegration(workspace.id);
     const fakeProvider = new FakeIntegrationProvider().mockFound({ name: "Jane Doe" });
 
-    const result = await lookupContact(workspace.id, conversation.id, agent.id, "jane@example.test", {
-      integrationProviderFactory: fakeIntegrationProviderFactory(fakeProvider),
-    });
+    const result = await lookupContact(
+      workspace.id,
+      conversation.id,
+      { type: "human", userId: agent.id },
+      "jane@example.test",
+      { integrationProviderFactory: fakeIntegrationProviderFactory(fakeProvider) },
+    );
 
     expect(result.found).toBe(true);
 
@@ -725,9 +1018,13 @@ describe("lookupContact", () => {
     await connectFakeIntegration(workspace.id);
     const fakeProvider = new FakeIntegrationProvider().mockNotFound("ghost@example.test");
 
-    const result = await lookupContact(workspace.id, conversation.id, agent.id, "ghost@example.test", {
-      integrationProviderFactory: fakeIntegrationProviderFactory(fakeProvider),
-    });
+    const result = await lookupContact(
+      workspace.id,
+      conversation.id,
+      { type: "human", userId: agent.id },
+      "ghost@example.test",
+      { integrationProviderFactory: fakeIntegrationProviderFactory(fakeProvider) },
+    );
 
     expect(result.found).toBe(false);
     const notes = await withWorkspaceContext(workspace.id, (scopedDb) =>
@@ -744,9 +1041,13 @@ describe("lookupContact", () => {
     const fakeProvider = new FakeIntegrationProvider().mockError(new Error("HubSpot is down"));
 
     await expect(
-      lookupContact(workspace.id, conversation.id, agent.id, "jane@example.test", {
-        integrationProviderFactory: fakeIntegrationProviderFactory(fakeProvider),
-      }),
+      lookupContact(
+        workspace.id,
+        conversation.id,
+        { type: "human", userId: agent.id },
+        "jane@example.test",
+        { integrationProviderFactory: fakeIntegrationProviderFactory(fakeProvider) },
+      ),
     ).rejects.toThrow();
 
     const logs = await withWorkspaceContext(workspace.id, (scopedDb) =>
@@ -761,7 +1062,9 @@ describe("lookupContact", () => {
     const agent = await createUser(workspace.id);
     const conversation = await createConversation(workspace.id);
 
-    await expect(lookupContact(workspace.id, conversation.id, agent.id, "jane@example.test")).rejects.toThrow();
+    await expect(
+      lookupContact(workspace.id, conversation.id, { type: "human", userId: agent.id }, "jane@example.test"),
+    ).rejects.toThrow();
 
     const logs = await withWorkspaceContext(workspace.id, (scopedDb) =>
       scopedDb.select().from(integrationActionLogs).where(eq(integrationActionLogs.workspaceId, workspace.id)),

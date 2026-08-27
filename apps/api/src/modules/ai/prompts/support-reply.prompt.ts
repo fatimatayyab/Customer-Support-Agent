@@ -1,4 +1,4 @@
-import type { RetrievedContext } from "../ai-provider.js";
+import type { AiToolResult, RetrievedContext } from "../ai-provider.js";
 
 /**
  * Everything a provider needs to ask a model for a structured support
@@ -37,7 +37,49 @@ import type { RetrievedContext } from "../ai-provider.js";
 // workspace's own knowledge base/industry, not tuned to any one
 // customer's content. Grounding/anti-hallucination and the
 // confidence/escalation rules are unchanged in substance.
-export const PROMPT_VERSION = 4;
+// v5: v4 still treated "no exact match" and "customer asked directly" as
+// the same trigger for stating a limitation, so a direct "have you done
+// X?" got answered with an upfront "no" before anything else - reading
+// as an admission of weakness rather than a confident answer. Now only
+// the customer asking about that *exact* thing (or omission being
+// misleading) triggers stating a limitation; a general "have you done
+// something like this?" gets answered by leading with whatever related
+// experience the Knowledge Context does support, no explicit "no"
+// needed. Never fabricates - unchanged from v4.
+// v6: Support Orchestrator Stage 1 - when the Orchestrator's own
+// deterministic eligibility gate offers lookup_contact, the system
+// prompt now explains when/how to use it (buildToolsGuidance) and
+// buildUserContent can append a Tool Result block. Both are additive
+// and only present when toolsAvailable/toolResult are actually set -
+// a call with neither behaves identically to v5. (A pre-ship security
+// review tightened the failed/error-case wording in buildToolResultBlock
+// to stay generic - AiToolResult.error is a closed neutral reason, never
+// raw upstream error text - folded into v6 rather than a separate bump
+// since this version never shipped.)
+export const PROMPT_VERSION = 6;
+
+export const LOOKUP_CONTACT_TOOL_NAME = "lookup_contact";
+export const LOOKUP_CONTACT_TOOL_DESCRIPTION =
+  "Look up the customer's own contact/account record by email address. Only returns identity fields (name, email, company, lifecycle stage) - never use it for anything other than confirming the customer's own account identity or status.";
+
+export const LOOKUP_CONTACT_SCHEMA: {
+  type: "object";
+  properties: Record<string, unknown>;
+  required: string[];
+} = {
+  type: "object",
+  properties: {
+    email: {
+      type: "string",
+      description: "The customer's own email address, taken from the conversation - never invented.",
+    },
+  },
+  required: ["email"],
+};
+
+export interface LookupContactToolInput {
+  email: string;
+}
 
 export const RESPOND_TO_CUSTOMER_TOOL_NAME = "respond_to_customer";
 export const RESPOND_TO_CUSTOMER_TOOL_DESCRIPTION =
@@ -81,10 +123,22 @@ export interface RespondToCustomerToolInput {
   cited_sources: number[];
 }
 
-export function buildSystemPrompt(workspaceName: string): string {
+// Only appended when the Orchestrator's own eligibility gate
+// (integration-lookup-phrases.ts) already decided this message is a
+// plausible account-identity question with an email in context - this
+// text explains how to use the tool once offered, it does not decide
+// whether to offer it.
+function buildToolsGuidance(toolsAvailable: readonly string[]): string {
+  if (!toolsAvailable.includes(LOOKUP_CONTACT_TOOL_NAME)) return "";
+  return `
+
+You also have a ${LOOKUP_CONTACT_TOOL_NAME} tool available. Call it, instead of ${RESPOND_TO_CUSTOMER_TOOL_NAME}, only when the customer is asking about their own account/contact identity or status (e.g. "am I a customer", "what's my account status", "do you have my info on file") AND you can see their email address in the conversation. Never guess or invent an email - use only one that actually appears in the conversation. For anything else, including questions the Knowledge Context doesn't cover, answer normally with ${RESPOND_TO_CUSTOMER_TOOL_NAME} - do not use this tool as a substitute for knowledge you don't have.`;
+}
+
+export function buildSystemPrompt(workspaceName: string, toolsAvailable: readonly string[] = []): string {
   return `You are a customer support agent for ${workspaceName}, replying in a live chat.
 
-You must answer ONLY using the information given to you in the "Knowledge Context" section of the user message. Do not use anything you know from your own training, and never invent or assume facts about ${workspaceName} - its products, services, experience, customers, or capabilities - beyond what the Knowledge Context actually states. If the Knowledge Context doesn't contain enough information to answer, say so - see "When the knowledge base doesn't have a match" below for how.
+You must answer ONLY using the information given to you in the "Knowledge Context" section of the user message. Do not use anything you know from your own training, and never invent or assume facts about ${workspaceName} - its products, services, experience, customers, or capabilities - beyond what the Knowledge Context actually states. If the Knowledge Context doesn't fully cover what's being asked, see "When the exact experience isn't in the Knowledge Context" below for how to handle that.
 
 How to write the "reply" text, in general:
 - Write like a real, thoughtful person having a conversation - not a help article, a brochure, or a search result.
@@ -101,17 +155,39 @@ For an exploratory, brainstorming, or advisory message (the customer is thinking
 - Treat vague or early-stage ideas as a normal, welcome starting point, not something to correct or qualify before continuing.
 - Help them think it through rather than gathering requirements. Ask at most one natural follow-up question that responds directly to what they just said - never a generic qualifying question (like asking what industry or problem it's for) that would fit almost any conversation.
 
-When the knowledge base doesn't have a matching example, case study, or capability:
-- Don't volunteer that absence. Stay positive and possibility-focused - respond to the idea itself, not to what's missing from your knowledge.
-- If the customer directly asks whether you've done something like it before, answer honestly based on the Knowledge Context - don't claim experience or examples that aren't there, and don't dodge the question either.
-- Only mention a limitation at all when it genuinely prevents you from giving an accurate answer, and even then say it briefly and naturally - not as an apology or a wall of caveats.
-- Being warm and encouraging never means inventing an answer: never state or imply experience, customers, products, capabilities, or case studies that aren't in the Knowledge Context.
+When the exact experience, case study, or capability isn't in the Knowledge Context:
+- Never volunteer that it's missing. Lead with whatever relevant experience or capability the Knowledge Context does support, and keep the conversation moving - don't turn the reply into an admission of what you can't do.
+- A general question like "have you done something like this?" doesn't need an explicit "no" - a natural answer built around what IS there is enough.
+- State a specific limitation outright only when the customer asks about that exact thing directly, or leaving it unsaid would make your answer misleading. Even then, say it plainly and briefly and keep going - no apologizing, no over-explaining, nothing that makes the customer feel they should look elsewhere.
+- Never invent experience, customers, products, capabilities, case studies, or achievements to fill the gap.
 
 Other rules:
 - Always respond by calling the ${RESPOND_TO_CUSTOMER_TOOL_NAME} tool - never send a plain chat message outside of it.
 - Set "confidence" (0 to 1) to how well the provided Knowledge Context actually supports your answer - not how confident you are in your own wording. If the context is only tangentially related, use a low score.
 - Set "needs_escalation" to true if the context is insufficient, the customer seems upset, or the request needs a human (e.g. an account-specific action, a refund approval, a complaint).
-- In "cited_sources", list only the source numbers you actually relied on to write the reply. If you didn't use any, return an empty array.`;
+- In "cited_sources", list only the source numbers you actually relied on to write the reply. If you didn't use any, return an empty array.${buildToolsGuidance(toolsAvailable)}`;
+}
+
+// Rendered only on the second call of the bounded two-call flow, after
+// the Orchestrator has actually executed lookup_contact. Deliberately
+// terse and factual - the system prompt's tools guidance already told
+// the model how to use this, this block just states what came back.
+function buildToolResultBlock(toolResult?: AiToolResult): string {
+  if (!toolResult) return "";
+  if (toolResult.error) {
+    // Deliberately generic - toolResult.error is a closed neutral
+    // reason, never raw upstream error text (see AiToolResult's own
+    // comment), so there is nothing more specific it would be safe to
+    // say here anyway.
+    return `\n\nTool Result (${toolResult.tool}): the lookup could not be completed right now. Answer the customer honestly - don't claim to have found or not found their account, and don't speculate about why it failed.`;
+  }
+  if (!toolResult.found) {
+    return `\n\nTool Result (${toolResult.tool}): no matching contact was found. Answer the customer honestly - don't claim to have found their account.`;
+  }
+  // Deliberately membership-only - see AiToolResult's own comment on why
+  // this doesn't carry name/company/lifecycle stage. Simply confirm the
+  // match; never state or guess any further detail about the account.
+  return `\n\nTool Result (${toolResult.tool}): a matching contact was found for that email. Simply confirm to the customer that we do have a record for that email - do not state or guess their name, company, plan, lifecycle stage, or any other detail; you were not given any.`;
 }
 
 export function buildUserContent(
@@ -119,6 +195,7 @@ export function buildUserContent(
   retrievedContext: RetrievedContext[],
   customerMessage: string,
   pageContext?: { url: string; title: string },
+  toolResult?: AiToolResult,
 ): string {
   const historyBlock = history.length
     ? history.map((turn) => `${turn.senderType}: ${turn.content}`).join("\n")
@@ -140,7 +217,7 @@ export function buildUserContent(
 ${historyBlock}
 
 Knowledge Context:
-${contextBlock}${pageContextBlock}
+${contextBlock}${pageContextBlock}${buildToolResultBlock(toolResult)}
 
 Customer's latest message: ${customerMessage}`;
 }

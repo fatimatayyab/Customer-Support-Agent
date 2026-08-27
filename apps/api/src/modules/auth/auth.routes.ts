@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { redisClient } from "../../redis-client.js";
+import { checkRateLimit } from "../../rate-limit.js";
 import { getSessionWorkspace, logIn, signUp } from "./auth.service.js";
 import { requireSession } from "./require-session.js";
 import { SESSION_COOKIE_NAME, setSessionCookie } from "./session-token.js";
@@ -27,6 +29,17 @@ const logInSchema = z.object({
 // user who mistypes a password a few times.
 const AUTH_RATE_LIMIT = { max: 10, timeWindow: "10 minutes" };
 
+// The plugin-level limit above is IP-keyed, which a distributed attacker
+// can trivially route around by rotating IPs against one known
+// workspace+email. This is a second, per-account counter on top of it -
+// tighter (5, not 10) since it's scoped to a single target rather than
+// shared across every login attempt from one IP. Keyed on
+// workspaceSlug+email together, not email alone: the same email could be
+// a legitimate user in one workspace and a stuffing target in another,
+// and they shouldn't share a counter.
+const LOGIN_ATTEMPT_MAX = 5;
+const LOGIN_ATTEMPT_WINDOW_SECONDS = 600;
+
 export async function authRoutes(app: FastifyInstance) {
   app.post("/auth/signup", { config: { rateLimit: AUTH_RATE_LIMIT } }, async (request, reply) => {
     const body = signUpSchema.parse(request.body);
@@ -37,6 +50,12 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.post("/auth/login", { config: { rateLimit: AUTH_RATE_LIMIT } }, async (request, reply) => {
     const body = logInSchema.parse(request.body);
+    await checkRateLimit(
+      redisClient,
+      `rl:login-attempt:${body.workspaceSlug}:${body.email.toLowerCase()}`,
+      LOGIN_ATTEMPT_MAX,
+      LOGIN_ATTEMPT_WINDOW_SECONDS,
+    );
     const { token, session } = await logIn(body);
     setSessionCookie(reply, token);
     reply.send({ user: session });

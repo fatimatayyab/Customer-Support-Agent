@@ -5,6 +5,10 @@ import type {
 } from "../escalation-sync-provider.js";
 
 const AIRTABLE_API_BASE = "https://api.airtable.com/v0";
+// Same reasoning as hubspot-integration-provider.ts's constant - fetch
+// has no default timeout, and these are fire-and-forget background calls
+// that could otherwise hang the job that triggered them indefinitely.
+const REQUEST_TIMEOUT_MS = 10_000;
 
 interface AirtableConfig {
   apiKey: string;
@@ -41,6 +45,7 @@ export class AirtableEscalationProvider implements EscalationSyncProvider {
         Authorization: `Bearer ${this.config.apiKey}`,
         "Content-Type": "application/json",
       },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       body: JSON.stringify({
         fields: {
           Name: input.name,
@@ -83,6 +88,7 @@ export class AirtableEscalationProvider implements EscalationSyncProvider {
         Authorization: `Bearer ${this.config.apiKey}`,
         "Content-Type": "application/json",
       },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       body: JSON.stringify({
         fields: {
           Name: "Connection test",
@@ -107,6 +113,7 @@ export class AirtableEscalationProvider implements EscalationSyncProvider {
     await fetch(`${url}/${encodeURIComponent(body.id)}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${this.config.apiKey}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     }).catch(() => {});
   }
 }

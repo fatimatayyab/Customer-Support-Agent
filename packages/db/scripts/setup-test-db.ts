@@ -7,8 +7,8 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
  * exactly what infra/postgres/init/01-app-role.sql does for csa_dev,
  * applied to a second, separate database (csa_test) instead - so a
  * test run can never read or overwrite real dev data, while reusing
- * the same app_user/auth_resolver roles (those are cluster-wide, not
- * per-database, so they already exist).
+ * the same app_user/auth_resolver/platform_operator roles (those are
+ * cluster-wide, not per-database, so they already exist).
  *
  * Safe to re-run: CREATE DATABASE is guarded by an existence check
  * (Postgres has no CREATE DATABASE IF NOT EXISTS), every GRANT is
@@ -48,8 +48,10 @@ async function main() {
   await testDb.query("CREATE EXTENSION IF NOT EXISTS vector");
   await testDb.query(`GRANT CONNECT ON DATABASE ${TEST_DB_NAME} TO app_user`);
   await testDb.query(`GRANT CONNECT ON DATABASE ${TEST_DB_NAME} TO auth_resolver`);
+  await testDb.query(`GRANT CONNECT ON DATABASE ${TEST_DB_NAME} TO platform_operator`);
   await testDb.query("GRANT USAGE ON SCHEMA public TO app_user");
   await testDb.query("GRANT USAGE ON SCHEMA public TO auth_resolver");
+  await testDb.query("GRANT USAGE ON SCHEMA public TO platform_operator");
   await testDb.query("GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO app_user");
   await testDb.query("GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO app_user");
   await testDb.query("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO app_user");

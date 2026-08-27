@@ -7,6 +7,15 @@ import { workspaces } from "./workspaces.js";
 
 export const integrationActionResultEnum = pgEnum("integration_action_result", ["success", "failure"]);
 
+// Added when the AI itself gained the ability to trigger a lookup
+// (Support Orchestrator Stage 1, see docs/07) - "who triggered this" is
+// now a real two-way fact, not always a human. A nullable
+// triggered_by_user_id alone would have made NULL silently mean "the AI
+// did it", which is exactly the kind of overloaded-null ambiguity this
+// codebase avoids elsewhere; an explicit enum keeps "absent" and
+// "not human" as distinct concepts.
+export const integrationActionTriggerEnum = pgEnum("integration_action_trigger", ["human", "ai"]);
+
 // The audit trail 02_Product_Blueprint.md requires for the Act pillar:
 // "every action must be secure, auditable, and permission-controlled."
 // Deliberately separate from conversation_notes/messages - this is a
@@ -38,12 +47,13 @@ export const integrationActionLogs = pgTable(
     // verbatim, to avoid hoarding more third-party/customer data than the
     // audit trail actually needs.
     resultSummary: text("result_summary").notNull(),
-    // Not nullable: v1 is agent-triggered only (see docs/07's Phase 5
-    // notes), so every action has a real human who triggered it. Would
-    // need to become nullable the day the AI can trigger one autonomously.
-    triggeredByUserId: uuid("triggered_by_user_id")
-      .notNull()
-      .references(() => users.id),
+    // "That day" (see the old comment this replaced) - the AI can now
+    // trigger a lookup autonomously (Orchestrator Stage 1), so this is
+    // nullable and paired with triggeredBy below: populated only when
+    // triggeredBy = 'human', NULL when 'ai'. Never NULL for an unknown/
+    // absent reason - triggeredBy always says which case it is.
+    triggeredBy: integrationActionTriggerEnum("triggered_by").notNull(),
+    triggeredByUserId: uuid("triggered_by_user_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

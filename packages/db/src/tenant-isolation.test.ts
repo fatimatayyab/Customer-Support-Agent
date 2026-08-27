@@ -165,6 +165,7 @@ const fixtures: Record<string, FixtureBuilder> = {
         actionName: "test-action",
         resultStatus: "success",
         resultSummary: "ok",
+        triggeredBy: "human",
         triggeredByUserId: user.id,
       })
       .returning();

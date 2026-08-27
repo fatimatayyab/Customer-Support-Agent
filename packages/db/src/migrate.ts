@@ -7,7 +7,9 @@ import { dbEnv } from "./env.js";
 // ownership is what lets Row Level Security apply automatically to
 // app_user / auth_resolver without needing FORCE ROW LEVEL SECURITY.
 async function main() {
-  const pool = new Pool({ connectionString: dbEnv.MIGRATIONS_DATABASE_URL });
+  // A one-off script applying migrations sequentially - a single
+  // connection is all it ever needs.
+  const pool = new Pool({ connectionString: dbEnv.MIGRATIONS_DATABASE_URL, max: 1 });
   const db = drizzle(pool);
 
   await migrate(db, { migrationsFolder: "./migrations" });

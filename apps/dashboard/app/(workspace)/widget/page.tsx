@@ -80,11 +80,6 @@ export default function WidgetPage() {
   const { user: sessionUser } = useSession();
   const { showToast } = useToast();
   const [apiKeys, setApiKeys] = useState<ApiKeySummary[] | null>(null);
-  // hasEverProvisioned distinguishes "never installed" (auto-provision a
-  // default) from "installed once, then explicitly removed" (don't
-  // silently recreate it) - both look identical as an empty apiKeys
-  // array otherwise. Comes from GET /workspaces/api-keys's everProvisioned.
-  const [hasEverProvisioned, setHasEverProvisioned] = useState(false);
   // revealedKey/revealedKeyId represent the ONE primary install snippet
   // shown at the top of the Install section. Gated on revealedKeyId
   // matching the current primary's id (not just "is revealedKey set") so
@@ -120,8 +115,12 @@ export default function WidgetPage() {
     const data = await apiFetch<{ apiKeys: ApiKeySummary[]; everProvisioned: boolean }>("/workspaces/api-keys");
     const keys = data?.apiKeys ?? [];
     const everProvisioned = data?.everProvisioned ?? false;
+    // "everProvisioned" (the local var above) distinguishes "never
+    // installed" (auto-provision a default) from "installed once, then
+    // explicitly removed" (don't silently recreate it) - both look
+    // identical as an empty apiKeys array otherwise. See the mount-effect
+    // check below.
     setApiKeys(keys);
-    setHasEverProvisioned(everProvisioned);
     return { keys, everProvisioned };
   }
 
@@ -142,7 +141,6 @@ export default function WidgetPage() {
         setRevealedKey(result.apiKey.rawKey);
         setRevealedKeyId(result.apiKey.id);
         setApiKeys((keys) => (keys ? [...keys, result.apiKey] : [result.apiKey]));
-        setHasEverProvisioned(true);
       }
     } catch (err) {
       setInstallError(err instanceof ApiError ? err.message : "Could not set up your install code.");
@@ -267,7 +265,6 @@ export default function WidgetPage() {
       if (result) {
         setRevealedSiteKey({ id: result.apiKey.id, rawKey: result.apiKey.rawKey });
         setApiKeys((keys) => (keys ? [...keys, result.apiKey] : [result.apiKey]));
-        setHasEverProvisioned(true);
         setNewSiteName("");
         setNewSiteDomains("");
       }
@@ -392,8 +389,8 @@ export default function WidgetPage() {
               returning null): this is a workspace that has explicitly
               removed its only install and hasn't recreated one - the empty
               apiKeys array here must NOT silently auto-provision a
-              replacement (that's exactly the bug this state exists to
-              avoid; see hasEverProvisioned/refresh()'s mount-effect check). */}
+              replacement (that's exactly the bug everProvisioned exists to
+              avoid; see refresh()'s mount-effect check). */}
           {!primary && !installBusy && (
             <div className="rounded-md border border-slate-200 p-3 text-sm">
               <div className="font-medium text-slate-700">Not installed</div>

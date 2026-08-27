@@ -1,7 +1,13 @@
 import { withWorkspaceContext } from "@csa/db";
 import { AppError, NotFoundError } from "../../errors.js";
 import { decryptCredentials, encryptCredentials } from "./credential-crypto.js";
-import { deleteIntegration, getIntegrationForWorkspace, listIntegrations, upsertIntegration } from "./integration.repository.js";
+import {
+  deleteIntegration,
+  getIntegrationForWorkspace,
+  listIntegrations,
+  updateIntegrationConfig,
+  upsertIntegration,
+} from "./integration.repository.js";
 import type { ContactLookupResult, IntegrationProvider } from "./integration-provider.js";
 import { HubSpotIntegrationProvider } from "./providers/hubspot-integration-provider.js";
 
@@ -48,9 +54,21 @@ export async function connectHubspot(
 
   const credentials = await encryptCredentials({ accessToken });
 
-  return withWorkspaceContext(workspaceId, (scopedDb) =>
-    upsertIntegration(scopedDb, { workspaceId, provider: "hubspot", credentials, config: {} }),
-  );
+  return withWorkspaceContext(workspaceId, async (scopedDb) => {
+    // Reconnecting (e.g. after rotating an expired token) must not
+    // silently reset config back to {} - upsertIntegration's ON
+    // CONFLICT does a full replace of config, and aiToolCallingEnabled
+    // is the one config key that exists today. Without this, the
+    // routine "paste a new token" flow would silently disable AI
+    // tool-calling every time, with no error or indication anywhere.
+    const existing = await getIntegrationForWorkspace(scopedDb, workspaceId, "hubspot");
+    return upsertIntegration(scopedDb, {
+      workspaceId,
+      provider: "hubspot",
+      credentials,
+      config: existing?.config ?? {},
+    });
+  });
 }
 
 export async function listWorkspaceIntegrations(workspaceId: string) {
@@ -62,6 +80,38 @@ export async function disconnectIntegration(workspaceId: string, id: string): Pr
   if (!deleted) {
     throw new NotFoundError("Integration not found.");
   }
+}
+
+// Owner/Administrator-gated at the route (integration.routes.ts) - a
+// workspace opts in explicitly before the AI can trigger a lookup on
+// its own; a connected integration alone is never enough (see
+// generateAiReply's eligibility gate in support-orchestrator.ts, which
+// checks this in addition to its own message-content gate).
+export async function setAiToolCallingEnabled(workspaceId: string, id: string, enabled: boolean): Promise<void> {
+  const updated = await withWorkspaceContext(workspaceId, (scopedDb) =>
+    updateIntegrationConfig(scopedDb, workspaceId, id, { aiToolCallingEnabled: enabled }),
+  );
+  if (!updated) {
+    throw new NotFoundError("Integration not found.");
+  }
+}
+
+// The other half of generateAiReply's eligibility gate: even a message
+// that passes the deterministic content check (integration-lookup-phrases.ts)
+// only reaches the model with the tool offered if the workspace has
+// BOTH a connected HubSpot integration AND has explicitly opted in via
+// the toggle above. Returns false, never throws, for "not connected" -
+// this is a routine eligibility check on the hot path of every AI
+// reply, not a user-triggered action reporting its own failure.
+export async function isAiToolCallingEnabled(workspaceId: string): Promise<boolean> {
+  const integration = await withWorkspaceContext(workspaceId, (scopedDb) =>
+    getIntegrationForWorkspace(scopedDb, workspaceId, "hubspot"),
+  );
+  if (!integration || integration.status !== "connected") {
+    return false;
+  }
+  const config = integration.config as { aiToolCallingEnabled?: boolean } | null;
+  return config?.aiToolCallingEnabled === true;
 }
 
 // `result: null` (with `errorMessage` set) vs. throwing NotFoundError are

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -23,6 +23,7 @@
     "@fastify/websocket": "^11.2.0",
     "@google/genai": "^2.15.0",
     "@node-rs/argon2": "^2.0.2",
+    "@sentry/node": "^10.70.0",
     "cheerio": "^1.2.0",
     "dotenv": "^16.6.1",
     "drizzle-orm": "^0.44.7",
@@ -31,6 +32,7 @@
     "jose": "^5.10.0",
     "mammoth": "^1.12.0",
     "pino-pretty": "^13.1.2",
+    "tsx": "^4.20.6",
     "unpdf": "^1.8.0",
     "ws": "^8.18.3",
     "zod": "^3.25.76"
@@ -38,7 +40,6 @@
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@types/ws": "^8.18.1",
-    "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   }

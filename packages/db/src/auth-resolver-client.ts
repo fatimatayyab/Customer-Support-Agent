@@ -13,7 +13,10 @@ import { invitations, workspaceApiKeys, workspaceSignupInvites, workspaces } fro
 // invitation token) into a workspace_id has to happen before the request
 // has a tenant context to scope a normal query with. Nothing else should
 // use this client.
-const authResolverPool = new Pool({ connectionString: dbEnv.AUTH_RESOLVER_DATABASE_URL });
+// Lower than the main app_user pool (client.ts) - this connection only
+// serves the narrow pre-tenant-context lookups (API key/slug/token
+// resolution), a much smaller share of total query volume.
+const authResolverPool = new Pool({ connectionString: dbEnv.AUTH_RESOLVER_DATABASE_URL, max: 5 });
 const authResolverDb = drizzle(authResolverPool, {
   schema: { workspaceApiKeys, workspaces, invitations, workspaceSignupInvites },
 });

@@ -3,10 +3,19 @@ import { z } from "zod";
 import type { WorkspaceRole } from "@csa/shared";
 import { requireRole } from "../auth/require-role.js";
 import { requireSession } from "../auth/require-session.js";
-import { connectHubspot, disconnectIntegration, listWorkspaceIntegrations } from "./integration.service.js";
+import {
+  connectHubspot,
+  disconnectIntegration,
+  listWorkspaceIntegrations,
+  setAiToolCallingEnabled,
+} from "./integration.service.js";
 
 const connectHubspotSchema = z.object({
   accessToken: z.string().min(1),
+});
+
+const setAiToolCallingSchema = z.object({
+  enabled: z.boolean(),
 });
 
 // Same tier as API key and knowledge-base management - connecting an
@@ -39,7 +48,16 @@ export async function integrationRoutes(app: FastifyInstance) {
 
   app.get("/integrations", async (request, reply) => {
     const integrations = await listWorkspaceIntegrations(request.workspaceId!);
-    reply.send({ integrations });
+    reply.send({
+      integrations: integrations.map((integration) => ({
+        id: integration.id,
+        provider: integration.provider,
+        status: integration.status,
+        lastVerifiedAt: integration.lastVerifiedAt,
+        createdAt: integration.createdAt,
+        aiToolCallingEnabled: (integration.config as { aiToolCallingEnabled?: boolean } | null)?.aiToolCallingEnabled === true,
+      })),
+    });
   });
 
   app.delete<{ Params: { id: string } }>("/integrations/:id", async (request, reply) => {
@@ -49,6 +67,17 @@ export async function integrationRoutes(app: FastifyInstance) {
       "Only Owners and Administrators can manage integrations.",
     );
     await disconnectIntegration(request.workspaceId!, request.params.id);
+    reply.code(204).send();
+  });
+
+  app.patch<{ Params: { id: string } }>("/integrations/:id/ai-tool-calling", async (request, reply) => {
+    requireRole(
+      request.sessionUser!.role,
+      MANAGE_INTEGRATIONS_ROLES,
+      "Only Owners and Administrators can manage integrations.",
+    );
+    const body = setAiToolCallingSchema.parse(request.body);
+    await setAiToolCallingEnabled(request.workspaceId!, request.params.id, body.enabled);
     reply.code(204).send();
   });
 }

@@ -130,7 +130,12 @@ export async function conversationRoutes(app: FastifyInstance) {
   // make once a second action exists to generalize from, not before.
   app.post<{ Params: { id: string } }>("/conversations/:id/actions/contact-lookup", async (request, reply) => {
     const body = contactLookupSchema.parse(request.body);
-    const result = await lookupContact(request.workspaceId!, request.params.id, request.sessionUser!.userId, body.email);
+    const result = await lookupContact(
+      request.workspaceId!,
+      request.params.id,
+      { type: "human", userId: request.sessionUser!.userId },
+      body.email,
+    );
     reply.send({ result });
   });
 }

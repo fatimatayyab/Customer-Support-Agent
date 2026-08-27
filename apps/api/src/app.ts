@@ -6,6 +6,7 @@ import rateLimit from "@fastify/rate-limit";
 import staticFiles from "@fastify/static";
 import websocket from "@fastify/websocket";
 import fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import { pool } from "@csa/db";
 import { env } from "./config/env.js";
 import { errorHandler } from "./error-handler.js";
 import { redisClient } from "./redis-client.js";
@@ -112,7 +113,21 @@ export async function buildApp(): Promise<FastifyInstance> {
     errorResponseBuilder: () => new RateLimitExceededError(),
   });
 
-  app.get("/health", async () => ({ status: "ok" }));
+  // Deliberately checks DB and Redis connectivity, not just "the process
+  // is alive" - both are hard runtime dependencies (every request needs
+  // RLS-scoped Postgres; the global rate limiter needs Redis), so a host's
+  // health check should catch a broken connection to either, not just a
+  // process that's up but non-functional.
+  app.get("/health", async (_request, reply) => {
+    const [dbResult, redisResult] = await Promise.allSettled([pool.query("SELECT 1"), redisClient.ping()]);
+    const healthy = dbResult.status === "fulfilled" && redisResult.status === "fulfilled";
+    reply.code(healthy ? 200 : 503);
+    return {
+      status: healthy ? "ok" : "degraded",
+      db: dbResult.status === "fulfilled" ? "ok" : "unreachable",
+      redis: redisResult.status === "fulfilled" ? "ok" : "unreachable",
+    };
+  });
 
   app.register(authRoutes);
   app.register(workspaceRoutes);

@@ -44,12 +44,16 @@ export async function getIntegrationForWorkspace(
 // Never selects `credentials` - this is what the dashboard's integration
 // list actually renders, so there's no code path where a decrypted or
 // even encrypted credential value could leak into a route response.
+// `config` IS selected (non-secret by definition, see integrations.ts's
+// own comment) - the dashboard needs it to render the AI tool-calling
+// toggle's current state.
 export async function listIntegrations(scopedDb: ScopedDb, workspaceId: string) {
   return scopedDb
     .select({
       id: integrations.id,
       provider: integrations.provider,
       status: integrations.status,
+      config: integrations.config,
       lastVerifiedAt: integrations.lastVerifiedAt,
       createdAt: integrations.createdAt,
     })
@@ -63,4 +67,22 @@ export async function deleteIntegration(scopedDb: ScopedDb, workspaceId: string,
     .where(and(eq(integrations.id, id), eq(integrations.workspaceId, workspaceId)))
     .returning({ id: integrations.id });
   return deleted.length > 0;
+}
+
+// Full-replace, not a merge - config's only key today is
+// aiToolCallingEnabled (see integrations.ts: "empty for HubSpot today"),
+// so there's nothing else to preserve. Revisit if a second config key
+// is ever added.
+export async function updateIntegrationConfig(
+  scopedDb: ScopedDb,
+  workspaceId: string,
+  id: string,
+  config: Record<string, unknown>,
+) {
+  const [integration] = await scopedDb
+    .update(integrations)
+    .set({ config, updatedAt: new Date() })
+    .where(and(eq(integrations.id, id), eq(integrations.workspaceId, workspaceId)))
+    .returning();
+  return integration ?? null;
 }

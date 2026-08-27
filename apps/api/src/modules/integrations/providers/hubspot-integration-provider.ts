@@ -2,6 +2,9 @@ import type { ContactLookupResult, IntegrationProvider, LookupContactInput } fro
 
 const HUBSPOT_API_BASE = "https://api.hubapi.com";
 const CONTACT_PROPERTIES = ["firstname", "lastname", "email", "phone", "company", "lifecyclestage"];
+// Without this, an unresponsive HubSpot endpoint could hang the calling
+// request/job indefinitely - fetch has no default timeout.
+const REQUEST_TIMEOUT_MS = 10_000;
 
 interface HubspotCredentials {
   accessToken: string;
@@ -31,6 +34,7 @@ export class HubSpotIntegrationProvider implements IntegrationProvider {
 
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${this.credentials.accessToken}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     if (response.status === 404) {
@@ -77,6 +81,7 @@ export class HubSpotIntegrationProvider implements IntegrationProvider {
   async verifyConnection(): Promise<void> {
     const response = await fetch(`${HUBSPOT_API_BASE}/crm/v3/objects/contacts?limit=1`, {
       headers: { Authorization: `Bearer ${this.credentials.accessToken}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) {
       throw new Error(`HubSpot connection check failed with status ${response.status}.`);

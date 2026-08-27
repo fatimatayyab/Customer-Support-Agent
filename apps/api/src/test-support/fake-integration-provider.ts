@@ -1,8 +1,12 @@
-import type { ContactLookupResult, IntegrationProvider } from "../modules/integrations/integration-provider.js";
+import type { ContactLookupResult, IntegrationProvider, LookupContactInput } from "../modules/integrations/integration-provider.js";
 
 /** Same "throw loudly if unconfigured" discipline as FakeAiProvider. */
 export class FakeIntegrationProvider implements IntegrationProvider {
   private result: ContactLookupResult | Error | undefined;
+  // Captured on every call - lets a test assert the provider was never
+  // reached at all (e.g. a rejected/unauthorized tool call), not just
+  // what it returned when it was.
+  calls: LookupContactInput[] = [];
 
   mockFound(overrides: Partial<ContactLookupResult> = {}): this {
     this.result = {
@@ -38,7 +42,8 @@ export class FakeIntegrationProvider implements IntegrationProvider {
     return this;
   }
 
-  async lookupContact(): Promise<ContactLookupResult> {
+  async lookupContact(input: LookupContactInput): Promise<ContactLookupResult> {
+    this.calls.push(input);
     if (this.result === undefined) {
       throw new Error(
         "FakeIntegrationProvider.lookupContact called without a configured response - call fake.mockFound(...)/.mockNotFound(...) first.",

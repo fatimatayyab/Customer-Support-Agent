@@ -29,7 +29,9 @@ import {
 // why) clean instead of stretching auth_resolver's documented purpose.
 // Nothing outside this file and the platform-admin bootstrap script
 // should use this connection.
-const platformOperatorPool = new Pool({ connectionString: dbEnv.PLATFORM_OPERATOR_DATABASE_URL });
+// Low - only the Platform Owner Dashboard's own traffic reaches this
+// pool, a small fraction of the main app_user pool's volume.
+const platformOperatorPool = new Pool({ connectionString: dbEnv.PLATFORM_OPERATOR_DATABASE_URL, max: 5 });
 const platformOperatorDb = drizzle(platformOperatorPool, {
   schema: {
     conversations,

@@ -1,6 +1,7 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 import { AppError } from "./errors.js";
+import { captureError } from "./error-tracking.js";
 
 // Central place error responses are shaped. No route handler should ever
 // send a raw error message to the client - this is the only place that
@@ -36,5 +37,6 @@ export function errorHandler(error: FastifyError | Error, request: FastifyReques
   }
 
   request.log.error(error);
+  captureError(error);
   reply.code(500).send({ error: "Something went wrong." });
 }

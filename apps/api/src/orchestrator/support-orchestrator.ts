@@ -1,10 +1,13 @@
 import { withWorkspaceContext } from "@csa/db";
+import { z } from "zod";
 import { AppError, NotFoundError } from "../errors.js";
 import { getDefaultJobRunner, type JobRunner } from "../job-runner.js";
-import type { AiProvider } from "../modules/ai/ai-provider.js";
+import type { AiProvider, AiReplyResult, AiToolCallOutcome, AiToolName, AiToolResult } from "../modules/ai/ai-provider.js";
+import { LOOKUP_CONTACT_TOOL } from "../modules/ai/ai-provider.js";
 import { generateSupportReply, summarizeConversationHistory } from "../modules/ai/ai.service.js";
 import {
   CONFIDENCE_ESCALATION_THRESHOLD,
+  MAX_AI_TRIGGERED_LOOKUPS_PER_CONVERSATION,
   MAX_HISTORY_MESSAGES,
   MIN_RELEVANCE_SIMILARITY,
   RETRIEVAL_LIMIT,
@@ -40,8 +43,15 @@ import {
 } from "../modules/conversations/conversation.repository.js";
 import { insertMessage, listMessages, type MessageMetadata } from "../modules/conversations/message.repository.js";
 import { getCustomerById, insertCustomer } from "../modules/customers/customer.repository.js";
-import { insertIntegrationActionLog } from "../modules/integrations/integration-action-log.repository.js";
-import { lookupContact as lookupContactViaIntegration } from "../modules/integrations/integration.service.js";
+import {
+  CONTACT_LOOKUP_ACTION_NAME,
+  countAiTriggeredLookups,
+  insertIntegrationActionLog,
+} from "../modules/integrations/integration-action-log.repository.js";
+import {
+  isAiToolCallingEnabled,
+  lookupContact as lookupContactViaIntegration,
+} from "../modules/integrations/integration.service.js";
 import type { ContactLookupResult, IntegrationProvider } from "../modules/integrations/integration-provider.js";
 import type { EmbeddingProvider } from "../modules/knowledge/embedding-provider.js";
 import { searchKnowledge } from "../modules/knowledge/knowledge.service.js";
@@ -51,6 +61,7 @@ import { publishToConversation } from "../modules/realtime/conversation-hub.js";
 import { getUserById } from "../modules/users/user.repository.js";
 import { getWorkspaceById } from "../modules/workspaces/workspace.repository.js";
 import { isExplicitHumanRequest } from "./human-request-phrases.js";
+import { extractEmails, hasIdentifiableEmail, isAccountLookupQuestion } from "./integration-lookup-phrases.js";
 
 /**
  * This module IS the System Architecture's "Support Orchestrator" - the
@@ -259,42 +270,129 @@ async function generateAiReply(
       .slice(-MAX_HISTORY_MESSAGES)
       .map((entry) => ({ senderType: entry.senderType, content: entry.content }));
 
-    const relevantChunks = (
-      await searchKnowledge(workspaceId, customerMessage, RETRIEVAL_LIMIT, deps.embeddingProvider)
-    ).filter((chunk) => chunk.similarity >= MIN_RELEVANCE_SIMILARITY);
+    // Customer-authored text only - deliberately excludes AI/system
+    // messages, so an earlier AI reply or system fallback message can't
+    // itself satisfy the email-presence half of the gate below, and so
+    // extractEmails (used later to authorize which email the tool may
+    // actually run against) can never resolve to an email the workspace's
+    // own side of the conversation introduced.
+    const customerTexts = [
+      customerMessage,
+      ...recentHistory.filter((entry) => entry.senderType === "customer").map((entry) => entry.content),
+    ];
 
-    if (relevantChunks.length === 0) {
-      await recordEscalation(
+    // Independent of each other - retrieval never depends on the tool
+    // gate's DB check or vice versa - so they run concurrently rather
+    // than paying both latencies back to back on every single reply.
+    const [relevantChunks, toolsAvailable] = await Promise.all([
+      searchKnowledge(workspaceId, customerMessage, RETRIEVAL_LIMIT, deps.embeddingProvider).then((chunks) =>
+        chunks.filter((chunk) => chunk.similarity >= MIN_RELEVANCE_SIMILARITY),
+      ),
+      // Narrow, defensible eligibility gate (integration-lookup-phrases.ts):
+      // a connected+enabled integration is necessary but never sufficient
+      // on its own to expose lookup_contact - some customer turn must ALSO
+      // look like a plausible account-identity question, with an email
+      // somewhere in context. Without this, any knowledge-empty message in
+      // a workspace that happens to have HubSpot connected would bypass
+      // the no_relevant_knowledge fast path below, regardless of topic.
+      resolveToolsAvailable(workspaceId, customerTexts),
+    ]);
+
+    if (relevantChunks.length === 0 && toolsAvailable.length === 0) {
+      // Exactly today's behavior: zero relevant chunks and no eligible
+      // tool means there is nothing grounded for the model to work with,
+      // so it is never called at all.
+      await escalateNoRelevantKnowledge(
         workspaceId,
         conversationId,
-        {
-          reason: "no_relevant_knowledge",
-          detail: "No knowledge chunks met the minimum relevance threshold for this question.",
-        },
+        "No knowledge chunks met the minimum relevance threshold for this question.",
         deps,
       );
-      await sendSystemMessage(workspaceId, conversationId, NO_RELEVANT_KNOWLEDGE_MESSAGE, {
-        escalated: true,
-        escalationReason: "no_relevant_knowledge",
-      });
       return;
     }
 
-    const result = await generateSupportReply(
-      {
-        workspaceName,
-        history: recentHistory,
-        retrievedContext: relevantChunks.map((chunk) => ({
-          knowledgeChunkId: chunk.id,
-          knowledgeSourceId: chunk.knowledgeSourceId,
-          content: chunk.content,
-          similarity: chunk.similarity,
-        })),
-        customerMessage,
-        pageContext,
-      },
+    const retrievedContext = relevantChunks.map((chunk) => ({
+      knowledgeChunkId: chunk.id,
+      knowledgeSourceId: chunk.knowledgeSourceId,
+      content: chunk.content,
+      similarity: chunk.similarity,
+    }));
+
+    const outcome = await generateSupportReply(
+      { workspaceName, history: recentHistory, retrievedContext, customerMessage, pageContext, toolsAvailable },
       deps.aiProvider,
     );
+
+    let toolAttempted: AiToolName | undefined;
+    let toolOutcome: "found" | "not_found" | "error" | undefined;
+    let result: AiReplyResult;
+
+    if (outcome.kind === "tool_call") {
+      toolAttempted = outcome.tool;
+      const executed = await executeToolCall(workspaceId, conversationId, outcome, toolsAvailable, customerTexts, deps);
+      toolOutcome = executed.toolOutcome;
+
+      // Structural guarantee, not just a prompt instruction - the same
+      // principle the pre-existing relevance floor exists for (see this
+      // function's own opening comment). If there was no relevant
+      // knowledge AND the tool path never actually produced real
+      // grounding either (rejected, rate-limited, or failed), this is
+      // exactly the original "nothing to answer from" case - skip the
+      // second call entirely (nothing to ground a reply on, so nothing
+      // worth generating) rather than spend it only to discard whatever
+      // the model says and fall back anyway.
+      if (relevantChunks.length === 0 && toolOutcome !== "found" && toolOutcome !== "not_found") {
+        await escalateNoRelevantKnowledge(
+          workspaceId,
+          conversationId,
+          "No knowledge chunks met the minimum relevance threshold, and the offered lookup produced no grounding either.",
+          deps,
+        );
+        return;
+      }
+
+      const finalOutcome = await generateSupportReply(
+        { workspaceName, history: recentHistory, retrievedContext, customerMessage, pageContext, toolResult: executed.toolResult },
+        deps.aiProvider,
+      );
+
+      // The second call always forces respond_to_customer (both provider
+      // implementations stop offering lookup_contact once toolResult is
+      // set) - a tool_call here means a provider violated that contract.
+      // Bounded two-call flow, not a loop: surface it as a provider
+      // error rather than silently looping or guessing.
+      if (finalOutcome.kind === "tool_call") {
+        throw new Error("Provider returned a tool_call on the forced final respond_to_customer call.");
+      }
+      result = {
+        ...finalOutcome,
+        // Both calls spent real tokens - the first call (system prompt +
+        // tool schema + history, which ended in a tool_call rather than a
+        // reply) must not be silently dropped from what gets persisted,
+        // or analytics.repository.ts's token/cost aggregation undercounts
+        // every tool-attempted reply by the entire first call.
+        usage: {
+          inputTokens: outcome.usage.inputTokens + finalOutcome.usage.inputTokens,
+          outputTokens: outcome.usage.outputTokens + finalOutcome.usage.outputTokens,
+        },
+      };
+    } else {
+      result = outcome;
+
+      // Same structural guarantee as above, for the path where the
+      // model was offered the tool but chose to answer directly instead
+      // of calling it - toolOutcome stays undefined here, which is
+      // exactly the "no grounding produced" case.
+      if (relevantChunks.length === 0 && toolOutcome !== "found" && toolOutcome !== "not_found") {
+        await escalateNoRelevantKnowledge(
+          workspaceId,
+          conversationId,
+          "No knowledge chunks met the minimum relevance threshold, and the model did not use the offered lookup.",
+          deps,
+        );
+        return;
+      }
+    }
 
     // Escalation reason is decided before persisting, not after, so the
     // reply message itself can carry escalated/escalationReason in the
@@ -326,6 +424,7 @@ async function generateAiReply(
           usage: result.usage,
           finishReason: result.finishReason,
           ...(escalation ? { escalated: true, escalationReason: escalation.reason } : {}),
+          ...(toolAttempted ? { toolAttempted, toolOutcome } : {}),
         },
       }),
     );
@@ -350,6 +449,136 @@ async function generateAiReply(
   }
 }
 
+// The model's tool-call args are untrusted model output, not a route
+// body, but the same rule applies (CLAUDE.md: validate at the
+// boundary) - a malformed, empty, or non-email-shaped string must
+// never reach lookupContact/insertIntegrationActionLog unchecked. Both
+// providers pass through "" rather than throwing on missing/malformed
+// SDK output (see their own comments), so .email() is what actually
+// rejects that case here rather than it silently "authorizing" an
+// empty string against the customer-email set.
+const lookupContactArgsSchema = z.object({ email: z.string().email() });
+
+/**
+ * The narrow eligibility gate a connected integration alone must NOT
+ * satisfy on its own (see generateAiReply's comment above its call
+ * site). Cheap, deterministic checks run first and short-circuit before
+ * the one DB round-trip (isAiToolCallingEnabled) - most messages never
+ * reach it.
+ */
+async function resolveToolsAvailable(workspaceId: string, customerTexts: string[]): Promise<AiToolName[]> {
+  // Checked across every recent customer turn, not just the latest
+  // message - the feature's own natural flow is two turns (the AI/prompt
+  // effectively asks for an email, the customer replies with just the
+  // email), and a bare "jane@example.com" reply wouldn't itself match an
+  // account-question phrase. hasIdentifiableEmail below already scans
+  // every turn for exactly this reason; the account-question check needs
+  // the same breadth to actually reach the flow it's meant to serve.
+  if (!customerTexts.some((text) => isAccountLookupQuestion(text))) {
+    return [];
+  }
+  if (!hasIdentifiableEmail(customerTexts)) {
+    return [];
+  }
+  const enabled = await isAiToolCallingEnabled(workspaceId);
+  return enabled ? [LOOKUP_CONTACT_TOOL] : [];
+}
+
+interface ToolCallExecution {
+  toolResult: AiToolResult;
+  toolOutcome: "found" | "not_found" | "error";
+}
+
+/**
+ * The one authorized, rate-limited, audited step of the bounded
+ * two-call flow - isolated from generateAiReply so the authorization
+ * chain (offered? valid args? customer-authorized email? under the
+ * per-conversation cap?) reads as one linear sequence of early returns
+ * instead of nested conditionals mixed into the caller's own control
+ * flow.
+ */
+async function executeToolCall(
+  workspaceId: string,
+  conversationId: string,
+  outcome: AiToolCallOutcome,
+  toolsAvailable: AiToolName[],
+  customerTexts: string[],
+  deps: OrchestratorDeps,
+): Promise<ToolCallExecution> {
+  const rejected: ToolCallExecution = {
+    toolResult: { tool: outcome.tool, found: false, error: "lookup_failed" },
+    toolOutcome: "error",
+  };
+
+  // Defense in depth, not redundant: toolsAvailable is the Orchestrator's
+  // own authorization decision (CLAUDE.md: the AI Service must never
+  // make one itself). Both providers already restrict which tools they
+  // offer/force based on toolsAvailable, but re-asserting it here means
+  // a future provider bug can only ever produce a rejected tool_call,
+  // never a live lookup a workspace never actually authorized.
+  if (!toolsAvailable.includes(outcome.tool)) {
+    return rejected;
+  }
+
+  const parsedArgs = lookupContactArgsSchema.safeParse(outcome.args);
+  if (!parsedArgs.success) {
+    return rejected;
+  }
+
+  // The email the tool actually runs against must be one the customer
+  // themselves typed in this conversation - never one read out of
+  // retrieved knowledge content, an earlier AI/system message, or
+  // invented by the model. The system prompt already asks for this;
+  // this is the server-side enforcement of it.
+  const known = new Set(extractEmails(customerTexts).map((email) => email.toLowerCase()));
+  if (!known.has(parsedArgs.data.email.toLowerCase())) {
+    return rejected;
+  }
+  const authorizedEmail = parsedArgs.data.email;
+
+  // The customer channel is anonymous by design (no login), so nothing
+  // above actually verifies the visitor asking IS the person behind
+  // authorizedEmail - only that they typed it. This caps how many
+  // distinct probes one conversation can make, on top of the existing
+  // per-conversation widget message rate limit (which bounds message
+  // frequency, not lookup count specifically). Best-effort, not atomic:
+  // a genuinely concurrent pair of qualifying messages in the same
+  // conversation could each read this count before either's insert
+  // lands, exceeding the cap by a small margin - accepted rather than
+  // adding per-conversation locking for what is a secondary abuse
+  // mitigation on top of the email-provenance check above, not the
+  // primary safeguard.
+  const priorLookups = await withWorkspaceContext(workspaceId, (scopedDb) =>
+    countAiTriggeredLookups(scopedDb, workspaceId, conversationId),
+  );
+  if (priorLookups >= MAX_AI_TRIGGERED_LOOKUPS_PER_CONVERSATION) {
+    return rejected;
+  }
+
+  // Executed via lookupContact's own try/catch-wrapped provider call,
+  // then wrapped again here: a failed lookup (bad credential, HubSpot
+  // down) must become a neutral tool result the model can react to
+  // gracefully on the forced final call, not an exception that skips
+  // straight to the generic ai_provider_error fallback - the customer
+  // still gets a real, on-topic answer instead of a hard escalation for
+  // what may just be "no matching contact."
+  try {
+    const contactResult = await lookupContact(workspaceId, conversationId, { type: "ai" }, authorizedEmail, deps);
+    return {
+      // Membership-only - see AiToolResult's own comment on why name/
+      // email/company/lifecycleStage never reach the customer-facing
+      // side of this tool, even though lookupContact's own audit log
+      // entry still records the full result for the dashboard.
+      toolResult: { tool: outcome.tool, found: contactResult.found },
+      toolOutcome: contactResult.found ? "found" : "not_found",
+    };
+  } catch {
+    // Never the caught error's own .message - see AiToolResult.error's
+    // comment on why raw upstream error text must not reach the model.
+    return rejected;
+  }
+}
+
 async function sendSystemMessage(
   workspaceId: string,
   conversationId: string,
@@ -361,6 +590,26 @@ async function sendSystemMessage(
   );
   publishToConversation(conversationId, { type: "typing:stop", payload: {} });
   publishToConversation(conversationId, { type: "message:receive", payload: message });
+}
+
+// Shared by all three call sites in generateAiReply that hit "there is
+// nothing to ground a reply on" - the original pre-Stage-1 empty-
+// retrieval path, and both of Stage 1's own equivalents (the tool path
+// never producing grounding, whether or not the model actually tried
+// it). Kept as one function so the deterministic fallback - the
+// customer-facing message, the escalation reason, and the metadata
+// shape - can't drift between the three sites.
+async function escalateNoRelevantKnowledge(
+  workspaceId: string,
+  conversationId: string,
+  detail: string,
+  deps: OrchestratorDeps,
+): Promise<void> {
+  await recordEscalation(workspaceId, conversationId, { reason: "no_relevant_knowledge", detail }, deps);
+  await sendSystemMessage(workspaceId, conversationId, NO_RELEVANT_KNOWLEDGE_MESSAGE, {
+    escalated: true,
+    escalationReason: "no_relevant_knowledge",
+  });
 }
 
 // --- Agent Console (Phase 4) ---
@@ -500,7 +749,7 @@ export async function suggestReplyForAgent(workspaceId: string, conversationId: 
     return null;
   }
 
-  return generateSupportReply(
+  const outcome = await generateSupportReply(
     {
       workspaceName,
       history: recentHistory,
@@ -514,6 +763,17 @@ export async function suggestReplyForAgent(workspaceId: string, conversationId: 
     },
     deps.aiProvider,
   );
+
+  // This call site never sets toolsAvailable, so a real provider can
+  // never actually return kind: "tool_call" here - narrowed defensively
+  // because the return type is the same shared union generateAiReply's
+  // tool-eligible call uses. `kind` is stripped so this route's response
+  // shape is unchanged from before Stage 1.
+  if (outcome.kind !== "reply") {
+    return null;
+  }
+  const { kind: _kind, ...replyResult } = outcome;
+  return replyResult;
 }
 
 /** On-demand only, not auto-triggered on escalation - see docs/07's Phase 4 notes for why. */
@@ -560,18 +820,29 @@ export async function summarizeConversationForAgent(
 
 // --- Integration Service (Phase 5) ---
 
+// Discriminates who's calling: a dashboard agent (existing Phase 5 flow,
+// unchanged behavior) or the AI itself (Support Orchestrator Stage 1).
+// Not a bare optional userId - an absent userId meaning "the AI did it"
+// is exactly the overloaded-null ambiguity integration_action_logs'
+// own triggeredBy enum was added to avoid (see that schema file's
+// comment); the same explicitness carries through to this call site.
+export type LookupContactTrigger = { type: "human"; userId: string } | { type: "ai" };
+
 /**
- * Agent-triggered only (docs/07's Phase 5 notes) - the AI never calls
- * this itself. A successful lookup is recorded as an internal note
- * (conversation_notes, agent-only), never a broadcast system message:
- * unlike a claim/reassign audit message (safe, purely "who's helping
- * you" metadata that Phase 4 deliberately does show the customer), a CRM
- * record may contain something an agent hasn't decided is appropriate to
- * relay yet - the same reasoning conversation_notes exists for.
+ * Callable by a dashboard agent (docs/07's Phase 5 notes) or, as of
+ * Stage 1, by the AI itself via generateAiReply's bounded tool-call
+ * flow - trigger.type says which. A successful lookup is recorded as an
+ * internal note (conversation_notes, agent-only) only for a human
+ * trigger: conversation_notes.userId is NOT NULL by design (no
+ * anonymous/system notes - see that schema file's comment), and there is
+ * no user to attribute an AI-triggered note to. Deliberately scoped out
+ * for Stage 1 rather than weakening that invariant; the AI's lookup
+ * still reaches the customer through its own reply, it just doesn't
+ * additionally get logged as a note to the agent.
  *
  * Every attempt is logged to integration_action_logs regardless of
- * outcome - the audit trail 02_Product_Blueprint.md requires for the
- * Act pillar ("every action must be secure, auditable, and
+ * outcome or trigger - the audit trail 02_Product_Blueprint.md requires
+ * for the Act pillar ("every action must be secure, auditable, and
  * permission-controlled"). "No integration connected" is a precondition,
  * not a loggable action - it's rejected before this point, inside
  * integration.service.ts, since there's no integration row yet to
@@ -580,7 +851,7 @@ export async function summarizeConversationForAgent(
 export async function lookupContact(
   workspaceId: string,
   conversationId: string,
-  userId: string,
+  trigger: LookupContactTrigger,
   email: string,
   deps: OrchestratorDeps = {},
 ): Promise<ContactLookupResult> {
@@ -598,7 +869,7 @@ export async function lookupContact(
       workspaceId,
       integrationId: outcome.integrationId,
       conversationId,
-      actionName: "contact-lookup",
+      actionName: CONTACT_LOOKUP_ACTION_NAME,
       requestParams: { email },
       resultStatus: outcome.result ? "success" : "failure",
       resultSummary: outcome.result
@@ -606,7 +877,8 @@ export async function lookupContact(
           ? `Found contact: ${outcome.result.name ?? outcome.result.email}.`
           : "No matching contact found."
         : (outcome.errorMessage ?? "Unknown integration error."),
-      triggeredByUserId: userId,
+      triggeredBy: trigger.type,
+      triggeredByUserId: trigger.type === "human" ? trigger.userId : null,
     }),
   );
 
@@ -614,10 +886,12 @@ export async function lookupContact(
     // Specific message is safe here - this route is dashboard-only,
     // never customer-facing, same allowance CLAUDE.md gives admin routes
     // generally. 502: the failure is upstream (the provider), not this API.
+    // (The AI-triggered call site wraps this in its own try/catch - see
+    // generateAiReply - so this throw never reaches the customer directly.)
     throw new AppError(`Contact lookup failed: ${outcome.errorMessage ?? "unknown error"}.`, 502);
   }
 
-  if (outcome.result.found) {
+  if (outcome.result.found && trigger.type === "human") {
     const { result } = outcome;
     const summary = [
       `Contact lookup for ${email}:`,
@@ -630,7 +904,7 @@ export async function lookupContact(
       .join(" ");
 
     await withWorkspaceContext(workspaceId, (scopedDb) =>
-      insertConversationNote(scopedDb, { workspaceId, conversationId, userId, content: summary }),
+      insertConversationNote(scopedDb, { workspaceId, conversationId, userId: trigger.userId, content: summary }),
     );
   }
 

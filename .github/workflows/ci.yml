@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Deliberately minimal, per docs/08's Stage 2 scope: typecheck, lint, and
+# the two real-DB test suites on every push/PR. No deploy step, no
+# matrix, no build-artifact publishing - those are separate, later
+# decisions (hosting platform, versioning strategy), not part of this.
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Matches docker-compose.yml exactly, so infra/postgres/init/
+        # 01-app-role.sql (written for local dev) applies unmodified.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: csa_dev
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # csa_test, not csa_dev, for all four - matching .env.test exactly
+      # (a real cross-database bug this same csa_dev/csa_test mismatch
+      # caused locally on PLATFORM_OPERATOR_DATABASE_URL specifically:
+      # see .env.test's own comment). The "Bootstrap DB roles" step below
+      # creates the roles against csa_dev (roles are cluster-wide, so
+      # that's just wherever the service's default database happens to
+      # be); "Set up the test database" then creates and migrates the
+      # actual csa_test database these four URLs point at, which is what
+      # every test suite below runs against.
+      MIGRATIONS_DATABASE_URL: postgres://postgres:postgres_dev_password@localhost:5432/csa_test
+      DATABASE_URL: postgres://app_user:app_user_dev_password@localhost:5432/csa_test
+      AUTH_RESOLVER_DATABASE_URL: postgres://auth_resolver:auth_resolver_dev_password@localhost:5432/csa_test
+      PLATFORM_OPERATOR_DATABASE_URL: postgres://platform_operator:platform_operator_dev_password@localhost:5432/csa_test
+      REDIS_URL: redis://localhost:6379
+      # Fixed, non-secret placeholders - only need to satisfy each
+      # env.ts schema's length/format checks; nothing test-sensitive
+      # depends on their real values (same precedent .env.test's own
+      # comment documents for local test runs).
+      SESSION_JWT_SECRET: ci-only-placeholder-session-secret-not-real-000000
+      PLATFORM_SESSION_JWT_SECRET: ci-only-placeholder-platform-secret-not-real-000
+      INTEGRATION_CREDENTIALS_KEY: ci-only-placeholder-credentials-key-not-real-00
+      DASHBOARD_ORIGIN: http://localhost:3000
+      AI_PROVIDER: gemini
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm -r run typecheck
+
+      - run: pnpm -r run lint
+
+      - name: Bootstrap DB roles (mirrors infra/postgres/init for a real service container)
+        run: PGPASSWORD=postgres_dev_password psql -h localhost -p 5432 -U postgres -d csa_dev -f infra/postgres/init/01-app-role.sql
+
+      - name: Set up the test database
+        run: pnpm --filter @csa/db test:db:setup
+        env:
+          TEST_DB_ADMIN_URL: postgres://postgres:postgres_dev_password@localhost:5432/csa_dev
+
+      - run: pnpm --filter @csa/db test
+      - run: pnpm --filter @csa/api test
+      - run: pnpm --filter @csa/widget test
