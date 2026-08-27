@@ -1,13 +1,13 @@
 # CLAUDE.md
 
-How Claude Code must behave in this repo — guardrails, not documentation. What/why lives in `docs/00`–`06`; what's built in `docs/07_Phase_Execution_Log.md`; general engineering principles in `docs/05_Engineering_Bible.md`; recurring-task SOPs in `.claude/skills/`; the team roster in `AGENTS.md` and `.claude/agents/`; feature work is coordinated via `.claude/commands/orchestrator.md`; fixed recurring workflows via Operators, indexed in `.claude/operators/README.md`. Read only what a task needs — don't front-load all docs every session.
+How Claude Code must behave in this repo — guardrails, not documentation. What/why lives in `docs/00`–`06`; what's built in `docs/07_Phase_Execution_Log.md`; the formally decided production architecture (hosting, scaling, CI/CD, domains) lives in `docs/08_Production_Architecture.md`; future product direction and the Fin/Intercom benchmark comparison live in `docs/09_Fin_Benchmark_And_Product_Roadmap.md`; general engineering principles in `docs/05_Engineering_Bible.md`; recurring-task SOPs in `.claude/skills/`; the team roster in `AGENTS.md` and `.claude/agents/`; feature work is coordinated via `.claude/commands/orchestrator.md`; fixed recurring workflows via Operators, indexed in `.claude/operators/README.md`. Read only what a task needs — don't front-load all docs every session.
 
 ---
 
 ## 1. Decision Hierarchy
 
 1. User instruction this conversation — flag it first if it contradicts something below, don't silently override or silently refuse.
-2. `docs/00`–`06` (approved architecture) → 3. this file → 4. `docs/07` (what's actually built — check before assuming unbuilt) → 5. existing code patterns → 6. your judgment (lowest precedence; if used for a consequential gap-fill, say so and log it in `docs/07`).
+2. `docs/00`–`06` (approved architecture) → 3. this file → 4. `docs/07` (what's actually built — check before assuming unbuilt) → 5. `docs/09` (approved future direction/roadmap — check before proposing new-feature scope or timing) → 6. existing code patterns → 7. your judgment (lowest precedence; if used for a consequential gap-fill, say so and log it in `docs/07`).
 
 **Ask before proceeding** on anything expensive to reverse (schema shape, auth mechanism, new vendor, tenant isolation) not already settled in `docs/00`–`06` or §2.
 

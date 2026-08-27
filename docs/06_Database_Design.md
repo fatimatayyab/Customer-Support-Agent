@@ -5,6 +5,8 @@
 **Version:** 1.0  
 **Status:** ✅ Approved
 
+**Note:** this document describes the long-run conceptual schema/storage shape. Current V1/V2 scope decisions (e.g., Billing — modeled below but deferred to V2; Object Storage — not built, knowledge uploads extract text and discard the original file per `docs/07`) are tracked in [`00_Product_Requirement_Specification.md`](./00_Product_Requirement_Specification.md), [`07_Phase_Execution_Log.md`](./07_Phase_Execution_Log.md), and [`09_Fin_Benchmark_And_Product_Roadmap.md`](./09_Fin_Benchmark_And_Product_Roadmap.md), not here.
+
 ---
 
 # Purpose

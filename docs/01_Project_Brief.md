@@ -2,6 +2,8 @@
 
 # Project Brief
 
+**Status:** ✅ Historical — superseded by [`00_Product_Requirement_Specification.md`](./00_Product_Requirement_Specification.md). Preserved for historical context only; do not treat anything below (including "Current Phase") as current.
+
 ## Project Name
 (TBD)
 

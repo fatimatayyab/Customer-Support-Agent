@@ -5,6 +5,8 @@
 **Version:** 1.0  
 **Status:** ✅ Approved
 
+**Note:** this document describes the long-run conceptual domain shape. Current V1/V2 scope decisions (e.g., Billing — modeled below as an entity but deferred to V2) are tracked in [`00_Product_Requirement_Specification.md`](./00_Product_Requirement_Specification.md) and [`09_Fin_Benchmark_And_Product_Roadmap.md`](./09_Fin_Benchmark_And_Product_Roadmap.md), not here.
+
 ---
 
 ## Workspace

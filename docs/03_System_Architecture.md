@@ -5,6 +5,8 @@
 **Version:** 1.1  
 **Status:** ✅ Approved
 
+**Note:** this document describes the approved *conceptual* architecture — components and their responsibilities. For which parts of it are actually implemented versus formally decided-but-not-yet-built for production (hosting, scaling, CI/CD, domains, realtime/job-queue evolution), see [`08_Production_Architecture.md`](./08_Production_Architecture.md). Current V1/V2 scope decisions (e.g., Billing — listed below as a component but deferred to V2) are tracked in [`00_Product_Requirement_Specification.md`](./00_Product_Requirement_Specification.md) and [`09_Fin_Benchmark_And_Product_Roadmap.md`](./09_Fin_Benchmark_And_Product_Roadmap.md), not here — this document's component list is the long-run conceptual shape, not a V1 commitment.
+
 ---
 
 # Architecture Principles

@@ -382,7 +382,6 @@ Version 1 will include:
 - Human Handoff
 - CRM Integrations
 - Analytics Dashboard
-- Billing & Subscription Management
 
 The MVP should provide a complete, production-ready customer support experience suitable for real businesses.
 
@@ -392,6 +391,7 @@ The MVP should provide a complete, production-ready customer support experience 
 
 The initial release will not include:
 
+- Billing & Subscription Management
 - Voice Calling
 - Video Support
 - Marketplace
@@ -399,6 +399,8 @@ The initial release will not include:
 - Custom AI Model Training
 - Enterprise SSO
 - Mobile Applications
+
+Billing was originally scoped for V1 (§15) but moved to V2 (2026-08-25): the actual V1 go-to-market is invite-gated design partners on manually negotiated terms, not self-serve signup, so a billing/subscription system has no real use case yet. `workspace_platform_meta.plan`/`billing_notes` (platform-owner-editable free text) is the deliberately minimal V1 stand-in.
 
 These capabilities may be introduced in future releases.
 
