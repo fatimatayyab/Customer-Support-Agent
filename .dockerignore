@@ -1,0 +1,30 @@
+# Reinstalled fresh inside the image, targeting its actual OS/arch — some
+# dependencies (e.g. @node-rs/argon2, sharp) ship native binaries per
+# platform, so a host-installed node_modules must never be copied in.
+**/node_modules
+
+# Local secrets — must never be baked into the image. Render injects real
+# env vars into the container at runtime instead.
+.env
+.env.*
+credentials
+.history
+
+# Build output the API doesn't need — it runs its own source via tsx, and
+# doesn't need the dashboard's or widget's build output either.
+**/dist
+apps/dashboard/.next
+apps/widget/dist
+
+# VCS / CI / editor
+.git
+.github
+.vscode
+
+# Not part of the API's runtime
+docs
+.claude
+knowledge-base
+infra
+
+*.log
