@@ -27,18 +27,29 @@ import { buildSummarizeSystemPrompt, buildSummarizeUserContent, SUMMARIZE_PROMPT
 // Free-tier friendly - the default AI_PROVIDER for local/dev work
 // specifically to avoid depending on a paid API before it's needed.
 //
-// Deliberately a floating alias, not a dated pin like Anthropic's
-// provider: a dated Gemini model id we tried here (gemini-2.5-flash)
-// was rejected outright for new API keys ("no longer available to new
-// users") well before its usual deprecation timeline. This provider's
-// whole purpose is cheap dev-stage iteration, not reproducibility -
-// Google's own "-latest" alias exists specifically so callers don't
-// have to chase model rotations by hand.
-const MODEL = "gemini-flash-latest";
+// Pinned, not the floating `gemini-flash-latest` alias: that alias now
+// resolves to `gemini-3.7-flash`, which measured 22-26s for a trivial
+// support prompt on a free-tier key (with thinking already disabled
+// below) - well past any reasonable customer-facing deadline, surfacing
+// as a Google 504 DEADLINE_EXCEEDED -> ai_provider_error escalation on
+// every reply. `gemini-2.5-flash` with the same key and config returns
+// in ~1s. The alias was originally chosen to dodge model-rotation
+// breakage, but a pin to a known-fast model beats an alias that can
+// silently point at an unusably slow one. If Google retires 2.5-flash
+// (a 404 here), move this to the next stable flash id and re-measure.
+const MODEL = "gemini-2.5-flash";
 
 // See the matching constant in anthropic-ai-provider.ts - a hung call
 // otherwise leaves the widget's typing indicator stuck indefinitely.
 const REQUEST_TIMEOUT_MS = 20_000;
+
+// Gemini 2.5 Flash runs "adaptive thinking" by default - extra
+// pre-response latency this support flow doesn't need: it forces a
+// single structured function call, not open reasoning. 0 = thinking
+// off, which is what gets the reply back in ~1s instead of many
+// seconds. If MODEL ever moves to an id that rejects a 0 budget
+// (some 2.5-pro / 3.x tiers enforce a minimum), revisit here.
+const THINKING_BUDGET = 0;
 
 export class GeminiAiProvider implements AiProvider {
   private client: GoogleGenAI | null = null;
@@ -75,6 +86,7 @@ export class GeminiAiProvider implements AiProvider {
       ),
       config: {
         httpOptions: { timeout: REQUEST_TIMEOUT_MS },
+        thinkingConfig: { thinkingBudget: THINKING_BUDGET },
         systemInstruction: buildSystemPrompt(input.workspaceName, offerLookup ? [LOOKUP_CONTACT_TOOL_NAME] : []),
         maxOutputTokens: MAX_OUTPUT_TOKENS,
         tools: [
@@ -171,6 +183,7 @@ export class GeminiAiProvider implements AiProvider {
       contents: buildSummarizeUserContent(input.history),
       config: {
         httpOptions: { timeout: REQUEST_TIMEOUT_MS },
+        thinkingConfig: { thinkingBudget: THINKING_BUDGET },
         systemInstruction: buildSummarizeSystemPrompt(input.workspaceName),
         maxOutputTokens: MAX_OUTPUT_TOKENS,
       },
