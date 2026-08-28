@@ -1,7 +1,12 @@
 import type { PlatformAdminSession, SessionUser } from "@csa/shared";
 import { cookies } from "next/headers";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+// Server-side calls go straight to the API's absolute origin (API_ORIGIN),
+// not through the /api/* browser proxy - a relative URL has no base in the
+// Node runtime. The session cookie is forwarded explicitly below, so this
+// is a plain server-to-server request (no SameSite/CORS involved). Falls
+// back to NEXT_PUBLIC_API_URL for local dev, where API_ORIGIN is unset.
+const API_URL = process.env.API_ORIGIN ?? process.env.NEXT_PUBLIC_API_URL;
 
 // Deliberately a plain string literal, not imported from @csa/shared -
 // this file is the dashboard's first genuine RUNTIME (non-type-only)
