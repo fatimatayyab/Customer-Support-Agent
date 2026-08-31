@@ -58,6 +58,8 @@ interface AnalyticsOverview {
   totalConversations: number;
   resolutionRate: number | null;
   escalationRate: number | null;
+  deflectedCount: number;
+  deflectionRate: number | null;
   volumeByDay: VolumeByDay[];
   statusBreakdown: StatusCount[];
   escalationReasonBreakdown: EscalationReasonCount[];
@@ -69,6 +71,11 @@ interface AnalyticsOverview {
 }
 
 const RANGE_OPTIONS = [7, 30, 90] as const;
+
+// Below this many conversations in range, every rate is still a bootstrap
+// signal rather than a stable baseline - the dashboard says so explicitly
+// instead of letting a 2-4 conversation deflection rate read as truth.
+const BOOTSTRAP_THRESHOLD = 50;
 
 const STATUS_LABELS: Record<string, string> = {
   open: "Open",
@@ -167,8 +174,17 @@ export default function AnalyticsPage() {
 
       {overview && (
         <div className="flex flex-col gap-6">
-          <section className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+          <section className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             <StatTile label="Conversations" value={String(overview.totalConversations)} />
+            <StatTile
+              label="Deflection rate"
+              value={formatPercent(overview.deflectionRate)}
+              subtext={
+                overview.totalConversations > 0
+                  ? `${overview.deflectedCount} of ${overview.totalConversations} deflected`
+                  : undefined
+              }
+            />
             <StatTile label="Resolution rate" value={formatPercent(overview.resolutionRate)} />
             <StatTile label="Escalation rate" value={formatPercent(overview.escalationRate)} />
             <StatTile label="Customer satisfaction" value={formatPercent(overview.csatScore)} />
@@ -177,6 +193,13 @@ export default function AnalyticsPage() {
               value={overview.aiStats.avgConfidence === null ? "—" : overview.aiStats.avgConfidence.toFixed(2)}
             />
           </section>
+
+          {overview.totalConversations > 0 && overview.totalConversations < BOOTSTRAP_THRESHOLD && (
+            <p className="text-xs text-slate-500">
+              Bootstrap baseline: only {overview.totalConversations} conversations in this range — treat the rates
+              above as preliminary until real traffic accumulates.
+            </p>
+          )}
 
           <Card>
             <CardHeader title="Conversation volume" />
@@ -287,11 +310,12 @@ export default function AnalyticsPage() {
   );
 }
 
-function StatTile({ label, value }: { label: string; value: string }) {
+function StatTile({ label, value, subtext }: { label: string; value: string; subtext?: string }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-elevation-sm">
       <div className="text-xs font-medium tracking-wide text-slate-500 uppercase">{label}</div>
       <div className="mt-1 text-2xl font-semibold text-slate-900">{value}</div>
+      {subtext && <div className="mt-1 text-xs text-slate-400">{subtext}</div>}
     </div>
   );
 }

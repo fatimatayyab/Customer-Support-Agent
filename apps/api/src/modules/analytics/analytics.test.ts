@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { conversationRatings, conversations, messages, withWorkspaceContext } from "@csa/db";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { escalateConversation, updateConversationStatus } from "../conversations/conversation.repository.js";
+import { assignConversation, escalateConversation, updateConversationStatus } from "../conversations/conversation.repository.js";
 import { insertMessage, type MessageMetadata } from "../conversations/message.repository.js";
 import { insertKnowledgeSource } from "../knowledge/knowledge-source.repository.js";
 import { rateConversation } from "../../orchestrator/support-orchestrator.js";
-import { createConversation, createWorkspace } from "../../test-support/fixtures.js";
+import { createConversation, createUser, createWorkspace } from "../../test-support/fixtures.js";
 import { resetDatabase } from "../../test-support/reset-database.js";
 import { getAnalyticsOverview } from "./analytics.service.js";
 
@@ -35,6 +35,21 @@ async function insertAiMessage(workspaceId: string, conversationId: string, over
   );
 }
 
+// An 'agent' message is the only structural proof a human actually replied
+// to a conversation (the deflection definition uses it as one of its three
+// exclusion signals).
+async function insertAgentMessage(workspaceId: string, conversationId: string, senderUserId: string) {
+  return withWorkspaceContext(workspaceId, (scopedDb) =>
+    insertMessage(scopedDb, {
+      workspaceId,
+      conversationId,
+      senderType: "agent",
+      content: "A human reply.",
+      senderUserId,
+    }),
+  );
+}
+
 beforeEach(async () => {
   await resetDatabase();
 });
@@ -52,6 +67,8 @@ describe("getAnalyticsOverview", () => {
     expect(overview.totalConversations).toBe(0);
     expect(overview.resolutionRate).toBeNull();
     expect(overview.escalationRate).toBeNull();
+    expect(overview.deflectedCount).toBe(0);
+    expect(overview.deflectionRate).toBeNull();
     expect(overview.volumeByDay).toEqual([]);
     expect(overview.statusBreakdown).toEqual([]);
     expect(overview.escalationReasonBreakdown).toEqual([]);
@@ -124,6 +141,105 @@ describe("getAnalyticsOverview", () => {
 
     const byReason = Object.fromEntries(overview.escalationReasonBreakdown.map((row) => [row.reason, row.count]));
     expect(byReason).toEqual({ no_relevant_knowledge: 2, low_confidence: 1 });
+  });
+
+  describe("deflection rate (no escalation AND no agent messages AND no assignment)", () => {
+    it("returns null deflection when there are no conversations in range", async () => {
+      const workspace = await createWorkspace();
+
+      const overview = await getAnalyticsOverview(workspace.id, 30);
+
+      expect(overview.deflectedCount).toBe(0);
+      expect(overview.deflectionRate).toBeNull();
+    });
+
+    it("counts an untouched AI-handled conversation as deflected", async () => {
+      const workspace = await createWorkspace();
+      await createConversation(workspace.id);
+      await createConversation(workspace.id);
+
+      const overview = await getAnalyticsOverview(workspace.id, 30);
+
+      expect(overview.deflectedCount).toBe(2);
+      expect(overview.deflectionRate).toBe(1);
+    });
+
+    it("does not use conversation status as a proxy - a status-only 'resolved' conversation still counts as deflected", async () => {
+      const workspace = await createWorkspace();
+      const conversation = await createConversation(workspace.id);
+      await withWorkspaceContext(workspace.id, (scopedDb) =>
+        updateConversationStatus(scopedDb, workspace.id, conversation.id, "resolved"),
+      );
+
+      const overview = await getAnalyticsOverview(workspace.id, 30);
+
+      // No escalation, no agent message, no assignment - only a human-set
+      // status field. Still deflected: status is queue bookkeeping, not
+      // evidence of human involvement.
+      expect(overview.deflectedCount).toBe(1);
+      expect(overview.deflectionRate).toBe(1);
+    });
+
+    it("excludes a conversation that was ever escalated, even after it is later resolved", async () => {
+      const workspace = await createWorkspace();
+      const conversation = await createConversation(workspace.id);
+      await withWorkspaceContext(workspace.id, (scopedDb) =>
+        escalateConversation(scopedDb, workspace.id, conversation.id, { reason: "no_relevant_knowledge", detail: "x" }),
+      );
+      await withWorkspaceContext(workspace.id, (scopedDb) =>
+        updateConversationStatus(scopedDb, workspace.id, conversation.id, "resolved"),
+      );
+
+      const overview = await getAnalyticsOverview(workspace.id, 30);
+
+      expect(overview.deflectedCount).toBe(0);
+      expect(overview.deflectionRate).toBe(0);
+    });
+
+    it("excludes a conversation with any agent message", async () => {
+      const workspace = await createWorkspace();
+      const user = await createUser(workspace.id);
+      const conversation = await createConversation(workspace.id);
+      await insertAgentMessage(workspace.id, conversation.id, user.id);
+
+      const overview = await getAnalyticsOverview(workspace.id, 30);
+
+      expect(overview.deflectedCount).toBe(0);
+      expect(overview.deflectionRate).toBe(0);
+    });
+
+    it("excludes an assigned conversation", async () => {
+      const workspace = await createWorkspace();
+      const user = await createUser(workspace.id);
+      const conversation = await createConversation(workspace.id);
+      await withWorkspaceContext(workspace.id, (scopedDb) =>
+        assignConversation(scopedDb, workspace.id, conversation.id, user.id),
+      );
+
+      const overview = await getAnalyticsOverview(workspace.id, 30);
+
+      expect(overview.deflectedCount).toBe(0);
+      expect(overview.deflectionRate).toBe(0);
+    });
+
+    it("computes the rate across a mixed population", async () => {
+      const workspace = await createWorkspace();
+      const user = await createUser(workspace.id);
+      await createConversation(workspace.id);
+      await createConversation(workspace.id);
+      const escalated = await createConversation(workspace.id);
+      const withAgentReply = await createConversation(workspace.id);
+      await withWorkspaceContext(workspace.id, (scopedDb) =>
+        escalateConversation(scopedDb, workspace.id, escalated.id, { reason: "low_confidence", detail: "x" }),
+      );
+      await insertAgentMessage(workspace.id, withAgentReply.id, user.id);
+
+      const overview = await getAnalyticsOverview(workspace.id, 30);
+
+      expect(overview.totalConversations).toBe(4);
+      expect(overview.deflectedCount).toBe(2);
+      expect(overview.deflectionRate).toBeCloseTo(0.5);
+    });
   });
 
   it("aggregates AI confidence, provider/model split, and token usage", async () => {
@@ -255,6 +371,10 @@ describe("getAnalyticsOverview", () => {
     expect(overview.totalConversations).toBe(1);
     expect(overview.aiStats.totalAiMessages).toBe(0);
     expect(overview.totalRatings).toBe(0);
+    // The one in-range conversation is untouched, so it deflects; the
+    // 60-day-old one is excluded from both numerator and denominator.
+    expect(overview.deflectedCount).toBe(1);
+    expect(overview.deflectionRate).toBe(1);
   });
 
   describe("tenant isolation", () => {
@@ -274,6 +394,8 @@ describe("getAnalyticsOverview", () => {
       expect(overviewB.aiStats.totalAiMessages).toBe(0);
       expect(overviewB.escalationReasonBreakdown).toEqual([]);
       expect(overviewB.totalRatings).toBe(0);
+      expect(overviewB.deflectedCount).toBe(0);
+      expect(overviewB.deflectionRate).toBeNull();
     });
   });
 });

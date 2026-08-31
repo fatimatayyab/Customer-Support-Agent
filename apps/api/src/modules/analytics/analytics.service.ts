@@ -4,6 +4,7 @@ import {
   getConversationStatusBreakdown,
   getConversationVolumeByDay,
   getCsatBreakdown,
+  getDeflectionStats,
   getEscalationReasonBreakdown,
   getTopCitedKnowledgeSources,
   type AiMessageStats,
@@ -29,6 +30,11 @@ export interface AnalyticsOverview {
   // should render differently.
   resolutionRate: number | null;
   escalationRate: number | null;
+  // Deflected = no escalation AND no agent messages AND no assignment
+  // (see getDeflectionStats) - deliberately not status-based. null when
+  // there are no conversations in range, matching resolution/escalation.
+  deflectedCount: number;
+  deflectionRate: number | null;
   volumeByDay: VolumeByDay[];
   statusBreakdown: StatusCount[];
   escalationReasonBreakdown: EscalationReasonCount[];
@@ -56,15 +62,16 @@ export async function getAnalyticsOverview(workspaceId: string, rangeDays: numbe
   // doesn't support concurrent queries on a single client (issuing them
   // concurrently just queues internally while logging a deprecation
   // warning today, and is slated to become a hard error in pg@9).
-  const { volumeByDay, statusBreakdown, escalationReasonBreakdown, aiStats, topCitedSources, csatBreakdown } =
+  const { volumeByDay, statusBreakdown, escalationReasonBreakdown, deflectionStats, aiStats, topCitedSources, csatBreakdown } =
     await withWorkspaceContext(workspaceId, async (scopedDb) => {
       const volumeByDay = await getConversationVolumeByDay(scopedDb, workspaceId, since);
       const statusBreakdown = await getConversationStatusBreakdown(scopedDb, workspaceId, since);
       const escalationReasonBreakdown = await getEscalationReasonBreakdown(scopedDb, workspaceId, since);
+      const deflectionStats = await getDeflectionStats(scopedDb, workspaceId, since);
       const aiStats = await getAiMessageStats(scopedDb, workspaceId, since);
       const topCitedSources = await getTopCitedKnowledgeSources(scopedDb, workspaceId, since, TOP_CITED_SOURCES_LIMIT);
       const csatBreakdown = await getCsatBreakdown(scopedDb, workspaceId, since);
-      return { volumeByDay, statusBreakdown, escalationReasonBreakdown, aiStats, topCitedSources, csatBreakdown };
+      return { volumeByDay, statusBreakdown, escalationReasonBreakdown, deflectionStats, aiStats, topCitedSources, csatBreakdown };
     });
 
   const totalConversations = statusBreakdown.reduce((sum, row) => sum + row.count, 0);
@@ -81,6 +88,8 @@ export async function getAnalyticsOverview(workspaceId: string, rangeDays: numbe
     totalConversations,
     resolutionRate: totalConversations > 0 ? resolvedCount / totalConversations : null,
     escalationRate: totalConversations > 0 ? escalatedCount / totalConversations : null,
+    deflectedCount: deflectionStats.deflectedCount,
+    deflectionRate: deflectionStats.totalCount > 0 ? deflectionStats.deflectedCount / deflectionStats.totalCount : null,
     volumeByDay,
     statusBreakdown,
     escalationReasonBreakdown,

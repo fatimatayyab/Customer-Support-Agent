@@ -72,6 +72,43 @@ export async function getEscalationReasonBreakdown(
     .groupBy(reason);
 }
 
+export interface DeflectionStats {
+  deflectedCount: number;
+  totalCount: number;
+}
+
+// Deflected = no escalation AND no agent messages AND no assignment.
+// Deliberately NOT derived from conversation.status - status is set by
+// humans as queue bookkeeping ('resolved'/'closed' can describe an AI-
+// handled conversation, and an escalated conversation can later be
+// resolved) so it's not a reliable signal for "did a human get involved".
+// The three signals here are structural: escalation metadata is merged
+// once and never cleared (same field getEscalationReasonBreakdown reads),
+// assignedUserId is set only by claim/assign, and an 'agent' message only
+// exists if a human actually replied.
+export async function getDeflectionStats(
+  scopedDb: ScopedDb,
+  workspaceId: string,
+  since: Date,
+): Promise<DeflectionStats> {
+  const escalation = sql`${conversations.metadata}->'escalation'`;
+  const hasAgentMessage = sql`exists (select 1 from ${messages} where ${messages.conversationId} = ${conversations.id} and ${messages.senderType} = 'agent')`;
+
+  const [stats] = await scopedDb
+    .select({
+      deflectedCount: sql<number>`count(*) filter (where ${conversations.assignedUserId} is null and ${escalation} is null and not ${hasAgentMessage})::int`,
+      totalCount: sql<number>`count(*)::int`,
+    })
+    .from(conversations)
+    .where(and(eq(conversations.workspaceId, workspaceId), gte(conversations.createdAt, since)));
+
+  // count(*) with no GROUP BY always returns exactly one row, even over
+  // zero matching conversations (deflectedCount: 0, totalCount: 0).
+  const row = assertDefined(stats, "getDeflectionStats: unconditioned aggregate produced no row.");
+
+  return { deflectedCount: row.deflectedCount, totalCount: row.totalCount };
+}
+
 export interface CsatCount {
   rating: string;
   count: number;

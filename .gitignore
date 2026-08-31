@@ -23,6 +23,12 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 
+# Vercel CLI link/pull state (project id, pulled env). Deploys use a
+# committed vercel.json + per-project VERCEL_ORG_ID/VERCEL_PROJECT_ID env
+# vars instead - see docs/07's widget/dashboard deployment entries.
+.vercel/
+.vercel
+
 .history/
 .qodo/
 

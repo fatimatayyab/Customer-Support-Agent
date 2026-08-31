@@ -10,6 +10,8 @@
 
 **How to use this document:** Section 1 is a benchmark, not a specification — CSA does not owe Intercom Fin feature parity. Section 4 is the load-bearing part: before proposing work that looks Fin-shaped, check whether it's already classified here, and follow that classification unless real customer evidence has changed since.
 
+**Current deployment state (verified live):** the API is deployed and verified on Render, the dashboard and widget are deployed and verified on Vercel, and BuildIQ is the first real client (live embed at `build-iq-three.vercel.app`). Sections 2–4 below reflect that Stage 1 is now in a **measurement phase** rather than still waiting for traffic (see the V1.x and Stage 2 notes).
+
 **Provenance note:** Section 1 reconstructs findings from an earlier working-session discussion of Intercom Fin, combined with generally known, publicly documented Fin/Intercom product behavior. It is a product-principle reference, not a technical audit of Intercom's actual implementation — several mechanism-level details (exact JWT claim structures, internal enforcement of workspace isolation, etc.) are not independently verifiable and are described at the level of observable product behavior only.
 
 ---
@@ -101,7 +103,7 @@ Nothing in this benchmark rises to a V1 completeness gap. The prior V1 audit's c
 - **Pre-deployment test-question tool** — a UI surface over the existing `searchKnowledge`/`generateSupportReply` pipeline (Phase 2/3), letting an owner ask real questions against the live knowledge base and see the AI's actual answer/confidence/citations before going live. No new AI capability required.
 - **Auto-fire the escalation summary at the moment of escalation**, instead of leaving it purely on-demand ("regenerate").
 - **Start collecting real transcripts toward an eval seed set** — a process to begin now, not a build; a meaningful eval set can't be constructed without real question distribution.
-- **Enable Stage 1 (`aiToolCallingEnabled`) for one real design partner** and watch the already-built go/no-go instrumentation (`getEscalationReasonBreakdown` + `messages.metadata.toolAttempted/toolOutcome`) — this is the actual blocker on Stage 2, not vendor selection.
+- **Enable Stage 1 (`aiToolCallingEnabled`) for one real design partner** and watch the already-built go/no-go instrumentation (`getEscalationReasonBreakdown` + `messages.metadata.toolAttempted/toolOutcome`) — this is the actual blocker on Stage 2, not vendor selection. *(Now current: BuildIQ is the first real client. The blocker is the live measurement phase — the toggle is off and has not yet produced a before/after signal against real traffic, not a missing-instrumentation problem. A browser smoke test against a live workspace key and confirming the Gemini model pin are the outstanding verification steps.)*
 - **Wire `SENTRY_DSN` for real** and observe it against genuine traffic (carried over from `docs/08`).
 
 ### V2 — deliberate builds, justified by this benchmark *and* real V1.x signal

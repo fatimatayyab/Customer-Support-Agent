@@ -177,9 +177,11 @@ A feature is complete when:
 
 ---
 
-# Claude Development Rules
+# Agent Development Rules
 
-Claude should:
+These apply to any coding agent working in this repo, regardless of tool.
+
+An agent should:
 
 - Follow all approved project artifacts.
 - Respect the System Architecture.
@@ -189,7 +191,7 @@ Claude should:
 - Prefer simple solutions over complex ones.
 - Ask for clarification rather than making assumptions about business requirements.
 
-Claude should never:
+An agent should never:
 
 - Introduce new architecture without approval.
 - Duplicate business logic.

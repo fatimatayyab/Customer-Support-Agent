@@ -1,0 +1,20 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "username": "csa",
+  "instructions": [
+    "AGENTS.md",
+    "docs/05_Engineering_Bible.md"
+  ],
+  "skills": {
+    "paths": [
+      "docs/skills"
+    ]
+  },
+  "mcp": {
+    "vercel": {
+      "type": "remote",
+      "url": "https://mcp.vercel.com",
+      "enabled": true
+    }
+  }
+}
