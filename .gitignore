@@ -29,7 +29,11 @@ Thumbs.db
 .vercel/
 .vercel
 
+# .history/ is an editor history dump; the *.local snapshots carry real
+# production credentials (plaintext .env / credentials files), so the whole
+# tree is ignored and the local snapshots are also ignored explicitly.
 .history/
+.history/*.local
 .qodo/
 
 # .claude/ holds the project's engineering framework (agents, skills,
@@ -47,6 +51,7 @@ coverage/
 test-results/
 playwright-report/
 
-# Local-only reference doc, not part of the shared repo
+# Local-only reference docs, not part of the shared repo
 docs/Developer_Onboarding_Walkthrough.md
 HANDOFF.md
+DEPLOYMENT_HANDOFF.md
