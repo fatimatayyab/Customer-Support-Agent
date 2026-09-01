@@ -1,6 +1,7 @@
 ---
 description: Implements apps/dashboard and apps/widget pages, components, UI state, and embed mechanics.
 mode: subagent
+model: opencode-go/deepseek-v4-flash
 permission:
   edit: allow
   write: allow

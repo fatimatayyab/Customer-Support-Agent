@@ -1,6 +1,7 @@
 ---
 description: Mandatory gate whenever a diff touches authentication, authorization, tenant-scoped tables, API keys, permissions, or secrets. Reviews and reports findings; does not implement fixes. Veto power.
 mode: subagent
+model: opencode-go/gpt-5.6-luna
 permission:
   edit: deny
   write: deny

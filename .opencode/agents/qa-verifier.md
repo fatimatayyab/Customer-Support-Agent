@@ -1,6 +1,7 @@
 ---
 description: Mandatory gate before any work is declared complete. Verifies via real execution — curl/WS/browser — not type-checking alone. Reports findings; does not implement fixes.
 mode: subagent
+model: opencode-go/qwen3.7-plus
 permission:
   edit: deny
   write: deny

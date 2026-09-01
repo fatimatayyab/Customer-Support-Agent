@@ -1,6 +1,7 @@
 ---
 description: Scopes cross-module/ambiguous work, protects architectural consistency, says no to unnecessary complexity. Read-only reviewer — never edits code.
 mode: subagent
+model: opencode-go/gpt-5.6-luna
 permission:
   edit: deny
   write: deny

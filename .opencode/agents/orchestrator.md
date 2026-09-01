@@ -1,6 +1,7 @@
 ---
 description: The engineering lead. Classifies the task, delegates to the specialist subagents, enforces the completion gates, and reports back. Does not implement code.
 mode: primary
+model: opencode-go/deepseek-v4-flash
 permission:
   edit: allow
   bash: allow

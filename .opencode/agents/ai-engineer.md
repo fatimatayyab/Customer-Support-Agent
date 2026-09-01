@@ -1,6 +1,7 @@
 ---
 description: Owns prompts, RAG, embeddings, AI provider integration, and AI behavior.
 mode: subagent
+model: opencode-go/gpt-5.6-luna
 permission:
   edit: allow
   write: allow

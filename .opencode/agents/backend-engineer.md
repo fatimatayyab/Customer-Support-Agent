@@ -1,6 +1,7 @@
 ---
 description: Implements apps/api, packages/db, the Support Orchestrator, and Integration providers.
 mode: subagent
+model: opencode-go/qwen3.7-plus
 permission:
   edit: allow
   write: allow
