@@ -776,7 +776,11 @@ export async function suggestReplyForAgent(workspaceId: string, conversationId: 
   return replyResult;
 }
 
-/** On-demand only, not auto-triggered on escalation - see docs/07's Phase 4 notes for why. */
+/**
+ * The one summarize implementation both triggers share: the on-demand
+ * /summarize route (regenerate) and the auto-fire on escalation
+ * (recordEscalation -> autoSummarizeEscalation). See docs/09 §V1.x.
+ */
 export async function summarizeConversationForAgent(
   workspaceId: string,
   conversationId: string,
@@ -816,6 +820,46 @@ export async function summarizeConversationForAgent(
   );
 
   return result;
+}
+
+/**
+ * Fired by recordEscalation whenever a conversation escalates, so the
+ * human taking over gets the full story without clicking "regenerate"
+ * (docs/09 §V1.x: "Auto-fire the escalation summary at the moment of
+ * escalation"). Best-effort: routed through JobRunner and wrapped in a
+ * .catch at its call site, so a failure here can never break the
+ * escalation itself. Reuses the exact same summarizeConversationForAgent
+ * the on-demand /summarize route calls - only the trigger differs.
+ *
+ * The duplicate guard compares aiSummary.generatedAt against the current
+ * escalation's escalatedAt (escalateConversation stamps that timestamp
+ * on every escalation, and saveConversationSummary stamps generatedAt):
+ * a summary generated at-or-after the escalation already reflects it, so
+ * regenerating would be duplicate work for the same escalation. A later,
+ * genuinely new escalation (a new escalatedAt) passes the guard and gets
+ * a fresh summary. Exported so the deterministic tests can re-invoke the
+ * trigger for the "same escalation" case; not routed anywhere itself.
+ */
+export async function autoSummarizeEscalation(
+  workspaceId: string,
+  conversationId: string,
+  deps: OrchestratorDeps = {},
+): Promise<void> {
+  const conversation = await withWorkspaceContext(workspaceId, (scopedDb) =>
+    getConversationById(scopedDb, workspaceId, conversationId),
+  );
+  if (!conversation) {
+    return;
+  }
+  const metadata = conversation.metadata as
+    | { escalation?: { escalatedAt?: string }; aiSummary?: { generatedAt?: string } }
+    | null;
+  const escalatedAt = metadata?.escalation?.escalatedAt;
+  const summaryGeneratedAt = metadata?.aiSummary?.generatedAt;
+  if (!escalatedAt || (summaryGeneratedAt && summaryGeneratedAt >= escalatedAt)) {
+    return;
+  }
+  await summarizeConversationForAgent(workspaceId, conversationId, deps);
 }
 
 // --- Integration Service (Phase 5) ---
@@ -971,6 +1015,15 @@ async function recordEscalation(
     escalateConversation(scopedDb, workspaceId, conversationId, escalation),
   );
 
+  const jobRunner = deps.jobRunner ?? getDefaultJobRunner();
+
+  // Auto-fire the escalation summary (docs/09 §V1.x). Best-effort, like
+  // the sync below: routed through JobRunner and swallowed with .catch so
+  // a summarize failure can never break the escalation that just succeeded.
+  // autoSummarizeEscalation's own guard keeps it from duplicating a summary
+  // the same escalation already has.
+  await jobRunner.run(() => autoSummarizeEscalation(workspaceId, conversationId, deps).catch(() => {}));
+
   const existingContact = await withWorkspaceContext(workspaceId, (scopedDb) =>
     getFullEscalationContactByConversationId(scopedDb, workspaceId, conversationId),
   );
@@ -978,7 +1031,6 @@ async function recordEscalation(
     return;
   }
 
-  const jobRunner = deps.jobRunner ?? getDefaultJobRunner();
   await jobRunner.run(() =>
     syncEscalationContactToPlatformMirror(workspaceId, conversationId, existingContact, deps).catch(() => {}),
   );

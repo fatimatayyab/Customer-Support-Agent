@@ -24,6 +24,9 @@ export class FakeAiProvider implements AiProvider {
   // mockReply), which a single replyResult can't.
   private replyQueue: (GenerateReplyOutcome | Error)[] = [];
   private summarizeResult: SummarizeResult | Error | undefined;
+  // Counts every summarize() invocation - lets a test assert "generated
+  // exactly once for this escalation" / "not regenerated for the same one".
+  summarizeCalls = 0;
   // Captured on every call, not just the configured output - lets a test
   // assert on what the orchestrator/AI Service actually sent (e.g.
   // pageContext threading) without needing a second fake mechanism. On
@@ -93,6 +96,13 @@ export class FakeAiProvider implements AiProvider {
     return this;
   }
 
+  // Mirrors mockReplyError: the error is what summarize() throws, so a
+  // test can exercise "the auto-summary failed" without a live provider.
+  mockSummarizeError(error: Error): this {
+    this.summarizeResult = error;
+    return this;
+  }
+
   async generateReply(input: GenerateReplyInput): Promise<GenerateReplyOutcome> {
     this.lastGenerateReplyInput = input;
     this.generateReplyInputs.push(input);
@@ -109,6 +119,7 @@ export class FakeAiProvider implements AiProvider {
   }
 
   async summarize(): Promise<SummarizeResult> {
+    this.summarizeCalls += 1;
     if (this.summarizeResult === undefined) {
       throw new Error(
         "FakeAiProvider.summarize called without a configured response - call fake.mockSummarize(...) before using it in a test.",

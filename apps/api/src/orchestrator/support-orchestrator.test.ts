@@ -31,6 +31,7 @@ import { createConversation, createCustomer, createUser, createWorkspace } from 
 import { resetDatabase } from "../test-support/reset-database.js";
 import {
   addInternalNote,
+  autoSummarizeEscalation,
   captureEscalationContact,
   changeConversationStatus,
   claimConversation,
@@ -971,6 +972,108 @@ describe("summarizeConversationForAgent", () => {
     );
     const metadata = conversationAfter?.metadata as { aiSummary?: { text: string } } | null;
     expect(metadata?.aiSummary?.text).toBe("Customer asked a question, unresolved.");
+  });
+});
+
+describe("auto-fired escalation summary", () => {
+  interface EscalationMetadata {
+    escalation?: { reason: string; escalatedAt?: string };
+    aiSummary?: { text?: string; generatedAt?: string };
+  }
+
+  async function readMetadata(workspaceId: string, conversationId: string) {
+    const conversation = await withWorkspaceContext(workspaceId, (scopedDb) =>
+      getConversationById(scopedDb, workspaceId, conversationId),
+    );
+    return (conversation?.metadata as EscalationMetadata | null) ?? {};
+  }
+
+  // Drives the no_relevant_knowledge escalation path - the simplest one
+  // (never calls generateReply, so the fake only needs mockSummarize).
+  async function escalate(workspaceId: string, conversationId: string, aiProvider: FakeAiProvider) {
+    await handleCustomerMessage(
+      { workspaceId, conversationId, content: "anything?" },
+      { jobRunner: new SynchronousJobRunner(), aiProvider, embeddingProvider: new FakeEmbeddingProvider() },
+    );
+  }
+
+  it("generates and persists a summary the moment a conversation escalates", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const aiProvider = new FakeAiProvider().mockSummarize({ summary: "Escalated: no relevant knowledge." });
+
+    await escalate(workspace.id, conversation.id, aiProvider);
+
+    const metadata = await readMetadata(workspace.id, conversation.id);
+    expect(metadata.escalation?.reason).toBe("no_relevant_knowledge");
+    expect(metadata.aiSummary?.text).toBe("Escalated: no relevant knowledge.");
+    expect(aiProvider.summarizeCalls).toBe(1);
+  });
+
+  it("does not regenerate a duplicate summary for the same escalation", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const aiProvider = new FakeAiProvider().mockSummarize({ summary: "Escalated: no relevant knowledge." });
+
+    await escalate(workspace.id, conversation.id, aiProvider);
+    expect(aiProvider.summarizeCalls).toBe(1);
+    const generatedAtAfterFirst = (await readMetadata(workspace.id, conversation.id)).aiSummary?.generatedAt;
+
+    // Re-invoking the auto-summary trigger for the same (unchanged)
+    // escalation must be a no-op: the existing summary already covers it.
+    await autoSummarizeEscalation(workspace.id, conversation.id, {
+      aiProvider,
+      jobRunner: new SynchronousJobRunner(),
+    });
+
+    expect(aiProvider.summarizeCalls).toBe(1);
+    expect((await readMetadata(workspace.id, conversation.id)).aiSummary?.generatedAt).toBe(generatedAtAfterFirst);
+  });
+
+  it("still produces a fresh summary for a genuinely new escalation", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const aiProvider = new FakeAiProvider().mockSummarize({ summary: "First escalation." });
+
+    await escalate(workspace.id, conversation.id, aiProvider);
+    expect(aiProvider.summarizeCalls).toBe(1);
+
+    // A second, new escalation event (new escalatedAt) passes the guard.
+    aiProvider.mockSummarize({ summary: "Second escalation." });
+    await escalate(workspace.id, conversation.id, aiProvider);
+
+    expect(aiProvider.summarizeCalls).toBe(2);
+    expect((await readMetadata(workspace.id, conversation.id)).aiSummary?.text).toBe("Second escalation.");
+  });
+
+  it("does not let a summarization failure break the escalation", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const aiProvider = new FakeAiProvider().mockSummarizeError(new Error("summarize failed"));
+
+    await escalate(workspace.id, conversation.id, aiProvider);
+
+    // The escalation itself still recorded; no summary was persisted
+    // because the provider threw, and nothing crashed.
+    const metadata = await readMetadata(workspace.id, conversation.id);
+    expect(metadata.escalation?.reason).toBe("no_relevant_knowledge");
+    expect(metadata.aiSummary).toBeUndefined();
+  });
+
+  it("keeps the on-demand summarize flow working after an auto-fired summary", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+    const aiProvider = new FakeAiProvider().mockSummarize({ summary: "Auto summary." });
+
+    await escalate(workspace.id, conversation.id, aiProvider);
+    expect((await readMetadata(workspace.id, conversation.id)).aiSummary?.text).toBe("Auto summary.");
+
+    aiProvider.mockSummarize({ summary: "Regenerated on demand." });
+    const result = await summarizeConversationForAgent(workspace.id, conversation.id, { aiProvider });
+
+    expect(result.summary).toBe("Regenerated on demand.");
+    expect((await readMetadata(workspace.id, conversation.id)).aiSummary?.text).toBe("Regenerated on demand.");
+    expect(aiProvider.summarizeCalls).toBe(2);
   });
 });
 
