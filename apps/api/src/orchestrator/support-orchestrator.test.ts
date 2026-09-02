@@ -31,6 +31,7 @@ import { createConversation, createCustomer, createUser, createWorkspace } from 
 import { resetDatabase } from "../test-support/reset-database.js";
 import {
   addInternalNote,
+  answerTestQuestion,
   autoSummarizeEscalation,
   captureEscalationContact,
   changeConversationStatus,
@@ -951,6 +952,73 @@ describe("suggestReplyForAgent", () => {
       listMessages(scopedDb, workspace.id, conversation.id),
     );
     expect(messagesAfter).toHaveLength(messagesBefore.length);
+  });
+});
+
+describe("answerTestQuestion", () => {
+  it("returns the grounded answer with confidence and citations for a known question", async () => {
+    const workspace = await createWorkspace();
+    const embeddingProvider = new FakeEmbeddingProvider();
+    await seedRelevantKnowledge(workspace.id, embeddingProvider);
+    const aiProvider = new FakeAiProvider().mockReply({
+      confidence: 0.9,
+      needsEscalation: false,
+      citations: [{ knowledgeChunkId: randomUUID(), knowledgeSourceId: randomUUID(), similarity: 0.9 }],
+    });
+
+    const result = await answerTestQuestion(workspace.id, "What is your refund policy?", { aiProvider, embeddingProvider });
+
+    expect(result.grounded).toBe(true);
+    expect(result.reply).toBe("This is a fake AI reply.");
+    expect(result.confidence).toBe(0.9);
+    expect(result.needsEscalation).toBe(false);
+    expect(result.citations).toHaveLength(1);
+    expect(result.provider).toBe("fake");
+  });
+
+  it("returns grounded:false without calling the model when nothing clears the relevance floor", async () => {
+    const workspace = await createWorkspace();
+    // No knowledge seeded. An unconfigured FakeAiProvider throws if
+    // generateReply is ever called - grounded:false without a throw
+    // proves the model was never invoked.
+    const aiProvider = new FakeAiProvider();
+
+    const result = await answerTestQuestion(workspace.id, "anything?", {
+      aiProvider,
+      embeddingProvider: new FakeEmbeddingProvider(),
+    });
+
+    expect(result.grounded).toBe(false);
+  });
+
+  it("flags needsEscalation when the reply would trigger the confidence threshold", async () => {
+    const workspace = await createWorkspace();
+    const embeddingProvider = new FakeEmbeddingProvider();
+    await seedRelevantKnowledge(workspace.id, embeddingProvider);
+    const aiProvider = new FakeAiProvider().mockReply({ confidence: 0.1, needsEscalation: false });
+
+    const result = await answerTestQuestion(workspace.id, "What is your refund policy?", { aiProvider, embeddingProvider });
+
+    expect(result.grounded).toBe(true);
+    expect(result.needsEscalation).toBe(true);
+  });
+
+  it("never sees another workspace's knowledge", async () => {
+    const workspaceA = await createWorkspace();
+    const workspaceB = await createWorkspace();
+    const embeddingProvider = new FakeEmbeddingProvider();
+    await seedRelevantKnowledge(workspaceA.id, embeddingProvider);
+
+    const result = await answerTestQuestion(workspaceB.id, "What is your refund policy?", {
+      aiProvider: new FakeAiProvider(),
+      embeddingProvider,
+    });
+
+    expect(result.grounded).toBe(false);
+  });
+
+  it("throws NotFoundError for a workspace that doesn't exist", async () => {
+    await expect(answerTestQuestion(randomUUID(), "question")).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

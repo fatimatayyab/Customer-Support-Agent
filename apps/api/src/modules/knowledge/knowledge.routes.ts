@@ -5,6 +5,7 @@ import type { WorkspaceRole } from "@csa/shared";
 import { requireRole } from "../auth/require-role.js";
 import { requireSession } from "../auth/require-session.js";
 import { AppError } from "../../errors.js";
+import { answerTestQuestion } from "../../orchestrator/support-orchestrator.js";
 import { rateLimitByWorkspace } from "../../rate-limit.js";
 import { redisClient } from "../../redis-client.js";
 import {
@@ -34,6 +35,10 @@ const searchSchema = z.object({
   limit: z.number().int().min(1).max(20).optional(),
 });
 
+const testQuestionSchema = z.object({
+  question: z.string().min(1).max(2000),
+});
+
 // Same tier as API key management - knowledge configuration is an
 // Administrator-level responsibility per 04_Domain_Model.md. Search
 // stays open to every authenticated role (including support_agent):
@@ -50,6 +55,13 @@ const MAX_UPLOAD_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 // single client's request volume - a whole office sharing one IP
 // shouldn't share (or multiply) the limit oddly.
 const INGESTION_RATE_LIMIT = rateLimitByWorkspace(redisClient, "knowledge-ingest", 30, 60 * 60);
+
+// The test-question endpoint makes a paid AI generation call per request
+// (unlike search, which is embedding-only) - bounded the same way the
+// ingestion routes are, keyed by workspace. Generous limit: an owner
+// legitimately experiments with a batch of questions before going live,
+// but unbounded would be an open cost-exposure hole.
+const TEST_QUESTION_RATE_LIMIT = rateLimitByWorkspace(redisClient, "knowledge-test-question", 60, 10 * 60);
 
 // Dashboard-facing: session-cookie authenticated, same as workspace.routes.ts.
 export async function knowledgeRoutes(app: FastifyInstance) {
@@ -138,5 +150,16 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     const body = searchSchema.parse(request.body);
     const results = await searchKnowledge(request.workspaceId!, body.query, body.limit);
     reply.send({ results });
+  });
+
+  app.post("/knowledge/test-question", { preHandler: TEST_QUESTION_RATE_LIMIT }, async (request, reply) => {
+    requireRole(
+      request.sessionUser!.role,
+      MANAGE_KNOWLEDGE_ROLES,
+      "Only Owners and Administrators can test the knowledge base.",
+    );
+    const body = testQuestionSchema.parse(request.body);
+    const result = await answerTestQuestion(request.workspaceId!, body.question);
+    reply.send({ result });
   });
 }

@@ -31,6 +31,18 @@ interface SearchResult {
   similarity: number;
 }
 
+interface TestQuestionResult {
+  grounded: boolean;
+  reply?: string;
+  confidence?: number | null;
+  needsEscalation?: boolean;
+  citations?: { knowledgeChunkId: string; knowledgeSourceId: string; similarity: number }[];
+  provider?: string;
+  model?: string;
+  promptVersion?: number;
+  finishReason?: string;
+}
+
 const POLL_INTERVAL_MS = 2000;
 
 const STATUS_TONES: Record<KnowledgeSource["status"], BadgeTone> = {
@@ -51,6 +63,11 @@ export default function KnowledgePage() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
+
+  const [testQuestion, setTestQuestion] = useState("");
+  const [testResult, setTestResult] = useState<TestQuestionResult | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testError, setTestError] = useState<string | null>(null);
 
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -190,6 +207,24 @@ export default function KnowledgePage() {
     }
   }
 
+  async function handleTestQuestion(event: FormEvent) {
+    event.preventDefault();
+    setTesting(true);
+    setTestError(null);
+    try {
+      const data = await apiFetch<{ result: TestQuestionResult }>("/knowledge/test-question", {
+        method: "POST",
+        body: JSON.stringify({ question: testQuestion }),
+      });
+      setTestResult(data?.result ?? null);
+    } catch (error) {
+      setTestError(error instanceof ApiError ? error.message : "Test failed.");
+      setTestResult(null);
+    } finally {
+      setTesting(false);
+    }
+  }
+
   if (!sources) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6 sm:py-10">
@@ -311,6 +346,58 @@ export default function KnowledgePage() {
                 </li>
               ))}
             </ul>
+          )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Test your assistant"
+          description="Preview the exact answer and confidence your customers would get before going live."
+        />
+        <CardBody className="flex flex-col gap-4">
+          <form onSubmit={handleTestQuestion} className="flex flex-col gap-2">
+            <Textarea
+              value={testQuestion}
+              onChange={(event) => setTestQuestion(event.target.value)}
+              placeholder="Ask a question a customer might ask..."
+              required
+              rows={3}
+            />
+            <Button type="submit" disabled={testing} className="self-start">
+              {testing ? "Asking..." : "Ask"}
+            </Button>
+          </form>
+
+          {testError && <InlineError message={testError} />}
+
+          {testResult && (
+            <div className="flex flex-col gap-3 rounded-md border border-slate-200 p-4">
+              {testResult.grounded ? (
+                <>
+                  <p className="text-sm text-slate-700">{testResult.reply}</p>
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                    <span>Confidence: {testResult.confidence === undefined || testResult.confidence === null ? "—" : testResult.confidence.toFixed(2)}</span>
+                    {testResult.needsEscalation && <Badge tone="warning">Would escalate</Badge>}
+                    <span>{testResult.citations?.length ?? 0} citation{testResult.citations?.length === 1 ? "" : "s"}</span>
+                    {testResult.model && <span>{testResult.model}</span>}
+                  </div>
+                  {testResult.citations && testResult.citations.length > 0 && (
+                    <ul className="flex flex-col gap-1 text-xs text-slate-400">
+                      {testResult.citations.map((citation, index) => (
+                        <li key={index}>
+                          similarity {citation.similarity.toFixed(3)} · source {citation.knowledgeSourceId.slice(0, 8)}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  No relevant knowledge found — the assistant would decline to answer and hand this to a human.
+                </p>
+              )}
+            </div>
           )}
         </CardBody>
       </Card>

@@ -2,7 +2,14 @@ import { withWorkspaceContext } from "@csa/db";
 import { z } from "zod";
 import { AppError, NotFoundError } from "../errors.js";
 import { getDefaultJobRunner, type JobRunner } from "../job-runner.js";
-import type { AiProvider, AiReplyResult, AiToolCallOutcome, AiToolName, AiToolResult } from "../modules/ai/ai-provider.js";
+import type {
+  AiProvider,
+  AiReplyResult,
+  AiToolCallOutcome,
+  AiToolName,
+  AiToolResult,
+  Citation,
+} from "../modules/ai/ai-provider.js";
 import { LOOKUP_CONTACT_TOOL } from "../modules/ai/ai-provider.js";
 import { generateSupportReply, summarizeConversationHistory } from "../modules/ai/ai.service.js";
 import {
@@ -774,6 +781,86 @@ export async function suggestReplyForAgent(workspaceId: string, conversationId: 
   }
   const { kind: _kind, ...replyResult } = outcome;
   return replyResult;
+}
+
+export interface TestQuestionResult {
+  // false when nothing cleared the relevance floor (or the provider
+  // misbehaved) - the customer-facing equivalent is the deterministic
+  // no_relevant_knowledge fallback, never a call to the model.
+  grounded: boolean;
+  reply?: string;
+  confidence?: number;
+  // The same decision generateAiReply makes before persisting: model
+  // asked for a human, or confidence below the escalation threshold.
+  needsEscalation?: boolean;
+  citations?: Citation[];
+  provider?: string;
+  model?: string;
+  promptVersion?: number;
+  finishReason?: string;
+}
+
+/**
+ * The pre-deployment test-question surface (docs/09 §V1.x): lets an
+ * owner ask a real question against the live knowledge base and see the
+ * exact answer/confidence/citations customers would get, before going
+ * live - no conversation is created and nothing is persisted or
+ * broadcast. Shares the same retrieval + generation pipeline as the
+ * customer-facing path (searchKnowledge -> generateSupportReply) and the
+ * same structural grounding guarantee (model is never called below
+ * MIN_RELEVANCE_SIMILARITY). Reaches two modules (knowledge + AI), so it
+ * lives here in the Orchestrator rather than in a route.
+ */
+export async function answerTestQuestion(
+  workspaceId: string,
+  question: string,
+  deps: OrchestratorDeps = {},
+): Promise<TestQuestionResult> {
+  const workspace = await withWorkspaceContext(workspaceId, (scopedDb) => getWorkspaceById(scopedDb, workspaceId));
+  if (!workspace) {
+    throw new NotFoundError("answerTestQuestion: workspace not found.");
+  }
+
+  const relevantChunks = (
+    await searchKnowledge(workspaceId, question, RETRIEVAL_LIMIT, deps.embeddingProvider)
+  ).filter((chunk) => chunk.similarity >= MIN_RELEVANCE_SIMILARITY);
+
+  if (relevantChunks.length === 0) {
+    return { grounded: false };
+  }
+
+  const outcome = await generateSupportReply(
+    {
+      workspaceName: workspace.name,
+      history: [],
+      retrievedContext: relevantChunks.map((chunk) => ({
+        knowledgeChunkId: chunk.id,
+        knowledgeSourceId: chunk.knowledgeSourceId,
+        content: chunk.content,
+        similarity: chunk.similarity,
+      })),
+      customerMessage: question,
+    },
+    deps.aiProvider,
+  );
+
+  // No tools are ever offered here, so a real provider can't return a
+  // tool_call - narrowed defensively the same way suggestReplyForAgent does.
+  if (outcome.kind !== "reply") {
+    return { grounded: false };
+  }
+
+  return {
+    grounded: true,
+    reply: outcome.reply,
+    confidence: outcome.confidence,
+    needsEscalation: outcome.needsEscalation || outcome.confidence < CONFIDENCE_ESCALATION_THRESHOLD,
+    citations: outcome.citations,
+    provider: outcome.provider,
+    model: outcome.model,
+    promptVersion: outcome.promptVersion,
+    finishReason: outcome.finishReason,
+  };
 }
 
 /**
