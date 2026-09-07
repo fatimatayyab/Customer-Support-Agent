@@ -61,7 +61,8 @@ Quite a lot, honestly:
 
 ## What's in progress or still missing
 
-- **No real email sending** for invitations yet — just the copy-link. The interface is built for it; no provider is plugged in.
+- **Real invitation email isn't sent yet** — invites are copy-link only (the `EmailSender` interface is built; no provider is plugged in). Sending real email (e.g. via Resend) is a decided near-term priority (`docs/09`).
+- **Account settings and customer chat input are decided near-term work, not yet built** — user profile/account settings, change/forgot-password, customer message attachments, and emoji/rich-text input are recorded as near-term priorities in `docs/09`; none are implemented. Voice/omnichannel remain future considerations, not commitments.
 - **Only one outside integration a business connects themselves** (HubSpot, one action — pulling up a contact; the AI can now trigger that same lookup itself under tight guardrails, but it's still the one integration, not a second one). The design supports adding more easily, but a second integration is deliberately waiting for real usage data to show which vendor/vertical actually matters, not a guess (`docs/09`).
 - **Billing/subscription management is deliberately out of scope for now, not an oversight** — it was in the original MVP list, but a completed V1 audit formally moved it to V2 (`docs/00` §16, `docs/09`) once it was clear our actual customers are hand-picked design partners on negotiated terms, not self-serve signups with a credit card. A platform-owner-editable plan/notes field is the minimal stand-in until a real vendor (almost certainly Stripe) and pricing model are worth deciding.
 - **No additional chat channels** (WhatsApp, email, etc.) — the website widget is the only one today.

@@ -106,6 +106,36 @@ Nothing in this benchmark rises to a V1 completeness gap. The prior V1 audit's c
 - **Enable Stage 1 (`aiToolCallingEnabled`) for one real design partner** and watch the already-built go/no-go instrumentation (`getEscalationReasonBreakdown` + `messages.metadata.toolAttempted/toolOutcome`) — this is the actual blocker on Stage 2, not vendor selection. *(Now current: BuildIQ is the first real client. The blocker is the live measurement phase — the toggle is off and has not yet produced a before/after signal against real traffic, not a missing-instrumentation problem. A browser smoke test against a live workspace key and confirming the Gemini model pin are the outstanding verification steps.)*
 - **Wire `SENTRY_DSN` for real** and observe it against genuine traffic (carried over from `docs/08`).
 
+### Near-term product work — active priorities, outside the V2 evidence gate
+
+Distinct from the tiers below. These are **product decisions already made** for the current stage,
+deliberately kept out of V2's evidence gate — none are implemented yet, and none reorder, promote, or
+accelerate any V2/V3 item. The V2/V3 tiers below remain exactly as classified, still evidence-driven.
+
+**Account & Team Experience** — active near-term product work:
+- **User profile / account settings** — a proper profile and account-settings surface for workspace users.
+- **Change password** — decided account control.
+- **Forgot / reset password** — decided account control.
+- **Account deletion and other basic account controls** — under review: whether they belong in the same
+  settings area is a decision to make during implementation, not settled here.
+- **Team / workspace experience improvements** — the existing `/team`, invitation, and role UX may be
+  improved where appropriate; concrete scope is a future decision.
+
+**Customer Chat UX** — the next customer-facing improvements:
+- **Customer message attachments** — sending attachments from the widget is active near-term work.
+- **Emoji / rich-text input** — active near-term work.
+- **Image / file sending** — included where appropriate, on the same attachment surface.
+- **Attachment architecture should let the AI understand supported attachment types in the future** — a
+  design constraint: attachments are not storage-only. Shape the message/attachment model (building on
+  `docs/07`'s deferred `attachments` column) so a later phase can pass supported types to the AI.
+- **Voice input/messages are a future consideration only** — not an immediate commitment. The existing
+  voice/omnichannel positioning (the RESERVED `channel-integration` Operator) is unchanged.
+
+**Team Invitation Emails** — near-term improvement:
+- **Real email delivery for team invitations (e.g. Resend)** — the existing `EmailSender` abstraction and
+  `NullEmailSender` (see `docs/07`'s Design-Partner Readiness milestone) stay; this implements a real
+  provider behind that existing interface, not new architecture.
+
 ### V2 — deliberate builds, justified by this benchmark *and* real V1.x signal
 
 - **Per-workspace configurable escalation rules** (sensitive-topic triggers). A high-priority V2 candidate and the clearest safety-related gap identified in this benchmark: CSA's global, hardcoded confidence threshold gives a business no way to guarantee certain topics always reach a human, which matters more to the extent CSA serves sensitive or regulated use cases. Where this actually falls in V2 sequencing relative to the other items below should still be set by V1 usage, customer evidence, and priorities at the time, not fixed here.
