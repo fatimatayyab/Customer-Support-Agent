@@ -1,7 +1,8 @@
 "use client";
 
-import { ChevronDown, LogOut, Moon, Sun } from "lucide-react";
+import { ChevronDown, LogOut, Moon, Settings, Sun } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { cn } from "../../lib/cn";
 import { type Theme, getEffectiveTheme, setTheme as persistTheme } from "../../lib/theme";
 
@@ -78,6 +79,14 @@ export function UserMenu({
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             {theme === "dark" ? "Light mode" : "Dark mode"}
           </button>
+          <Link
+            href="/settings"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
+          >
+            <Settings className="h-4 w-4" />
+            Settings
+          </Link>
           <button
             type="button"
             onClick={onLogout}

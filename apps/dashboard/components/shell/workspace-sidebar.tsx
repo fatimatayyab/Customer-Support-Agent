@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, BookOpen, Code2, LayoutDashboard, MessageSquare, Plug, Users, X } from "lucide-react";
+import { BarChart3, BookOpen, Code2, LayoutDashboard, MessageSquare, Plug, Settings, Users, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
@@ -21,6 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/team", label: "Team", icon: Users },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function isActive(pathname: string, href: string): boolean {

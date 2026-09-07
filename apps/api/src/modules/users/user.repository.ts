@@ -29,6 +29,25 @@ export async function getUserById(scopedDb: ScopedDb, workspaceId: string, id: s
   return user ?? null;
 }
 
+export async function updateUserName(scopedDb: ScopedDb, workspaceId: string, userId: string, name: string): Promise<void> {
+  await scopedDb
+    .update(users)
+    .set({ name, updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.workspaceId, workspaceId)));
+}
+
+export async function updateUserPassword(
+  scopedDb: ScopedDb,
+  workspaceId: string,
+  userId: string,
+  passwordHash: string,
+): Promise<void> {
+  await scopedDb
+    .update(users)
+    .set({ passwordHash, updatedAt: new Date() })
+    .where(and(eq(users.id, userId), eq(users.workspaceId, workspaceId)));
+}
+
 // Never selects passwordHash - this is what the dashboard's team page
 // renders, so there's no code path where a hash could leak into a route
 // response.
