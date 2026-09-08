@@ -15,6 +15,7 @@ interface Workspace {
 interface WorkspaceSessionValue {
   user: SessionUser;
   workspace: Workspace;
+  profile: { name: string } | null;
   logout: () => Promise<void>;
 }
 
@@ -36,7 +37,7 @@ const WorkspaceSessionContext = createContext<WorkspaceSessionValue | null>(null
 export function WorkspaceSessionProvider({
   children,
   initialSession,
-}: PropsWithChildren<{ initialSession: { user: SessionUser; workspace: Workspace } }>) {
+}: PropsWithChildren<{ initialSession: { user: SessionUser; workspace: Workspace; profile: { name: string } | null } }>) {
   const router = useRouter();
 
   async function logout() {

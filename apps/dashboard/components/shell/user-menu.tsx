@@ -7,13 +7,17 @@ import { cn } from "../../lib/cn";
 import { type Theme, getEffectiveTheme, setTheme as persistTheme } from "../../lib/theme";
 
 export function UserMenu({
+  name,
   email,
-  secondaryLabel,
+  workspaceName,
+  roleLabel,
   onLogout,
   accentClassName = "bg-brand",
 }: {
+  name: string;
   email: string;
-  secondaryLabel: string;
+  workspaceName: string;
+  roleLabel: string;
   onLogout: () => void;
   accentClassName?: string;
 }) {
@@ -44,7 +48,7 @@ export function UserMenu({
     setThemeState(next);
   }
 
-  const initial = email.charAt(0).toUpperCase();
+  const initial = name.trim().charAt(0).toUpperCase() || email.charAt(0).toUpperCase();
 
   return (
     <div className="relative" ref={ref}>
@@ -62,15 +66,19 @@ export function UserMenu({
           {initial}
         </span>
         <span className="hidden text-left sm:block">
-          <span className="block max-w-[10rem] truncate text-sm font-medium text-slate-900">{email}</span>
-          <span className="block text-xs text-slate-500">{secondaryLabel}</span>
+          <span className="block max-w-[10rem] truncate text-sm font-medium text-slate-900">{name}</span>
+          <span className="block max-w-[10rem] truncate text-xs text-slate-500">{workspaceName}</span>
         </span>
         <ChevronDown className="hidden h-4 w-4 text-slate-400 sm:block" />
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-1 w-44 rounded-md border border-slate-200 bg-white py-1 shadow-elevation-md">
-          <div className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500 sm:hidden">{email}</div>
+        <div className="absolute right-0 z-30 mt-1 w-56 rounded-md border border-slate-200 bg-white py-1 shadow-elevation-md">
+          <div className="border-b border-slate-100 px-3 py-2.5">
+            <div className="truncate text-sm font-semibold text-slate-900">{name}</div>
+            <div className="truncate text-xs text-slate-500">{workspaceName} · {roleLabel}</div>
+            <div className="truncate text-xs text-slate-400">{email}</div>
+          </div>
           <button
             type="button"
             onClick={toggleTheme}

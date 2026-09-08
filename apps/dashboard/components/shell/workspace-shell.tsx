@@ -14,7 +14,7 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export function WorkspaceShell({ children }: { children: ReactNode }) {
-  const { user, workspace, logout } = useSession();
+  const { user, workspace, profile, logout } = useSession();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
@@ -35,7 +35,13 @@ export function WorkspaceShell({ children }: { children: ReactNode }) {
           >
             <Menu className="h-5 w-5" />
           </button>
-          <UserMenu email={user.email} secondaryLabel={ROLE_LABELS[user.role] ?? user.role} onLogout={logout} />
+          <UserMenu
+            name={profile?.name || user.email}
+            email={user.email}
+            workspaceName={workspace.name}
+            roleLabel={ROLE_LABELS[user.role] ?? user.role}
+            onLogout={logout}
+          />
         </header>
 
         <main className="flex-1">{children}</main>

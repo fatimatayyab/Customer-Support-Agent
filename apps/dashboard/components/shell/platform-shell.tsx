@@ -26,7 +26,14 @@ export function PlatformShell({ children }: { children: ReactNode }) {
             </span>
             <span className="text-sm font-semibold text-slate-900">Platform</span>
           </Link>
-          <UserMenu email={admin.email} secondaryLabel="Platform admin" onLogout={logout} accentClassName="bg-accent-platform" />
+          <UserMenu
+            name={admin.email}
+            email={admin.email}
+            workspaceName="Platform"
+            roleLabel="Platform admin"
+            onLogout={logout}
+            accentClassName="bg-accent-platform"
+          />
         </div>
       </header>
 

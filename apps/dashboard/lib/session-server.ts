@@ -29,6 +29,12 @@ interface Workspace {
 export interface WorkspaceSessionData {
   user: SessionUser;
   workspace: Workspace;
+  // The logged-in user's display name, resolved server-side from the same
+  // session cookie (GET /workspaces/me) - SessionUser intentionally carries
+  // no name, and the shell/user menu need it to show the actual person.
+  // null only if the profile fetch failed (a non-fatal gap - the UI falls
+  // back to the email-derived initial).
+  profile: { name: string } | null;
 }
 
 // Root cause of Phase 1's widget double-provisioning bug: the
@@ -49,12 +55,21 @@ export async function getWorkspaceSession(): Promise<WorkspaceSessionData | null
   if (!token) return null;
 
   try {
-    const response = await fetch(`${API_URL}/auth/me`, {
-      headers: { Cookie: `${SESSION_COOKIE_NAME}=${token}` },
-      cache: "no-store",
-    });
-    if (!response.ok) return null;
-    return (await response.json()) as WorkspaceSessionData;
+    const headers = { Cookie: `${SESSION_COOKIE_NAME}=${token}` };
+    const [sessionResponse, profileResponse] = await Promise.all([
+      fetch(`${API_URL}/auth/me`, { headers, cache: "no-store" }),
+      fetch(`${API_URL}/workspaces/me`, { headers, cache: "no-store" }),
+    ]);
+    if (!sessionResponse.ok) return null;
+    const data = (await sessionResponse.json()) as WorkspaceSessionData;
+
+    let profile: WorkspaceSessionData["profile"] = null;
+    if (profileResponse.ok) {
+      const profileBody = (await profileResponse.json()) as { user?: { name?: string } };
+      profile = profileBody.user?.name ? { name: profileBody.user.name } : null;
+    }
+
+    return { ...data, profile };
   } catch {
     return null;
   }
