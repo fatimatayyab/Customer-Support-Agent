@@ -222,9 +222,11 @@ export default function SettingsPage() {
 
 function ReadonlyField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex min-w-0 flex-col gap-1">
       <span className="text-sm font-medium text-slate-700">{label}</span>
-      <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">{value}</span>
+      <span className="break-all rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+        {value}
+      </span>
     </div>
   );
 }
