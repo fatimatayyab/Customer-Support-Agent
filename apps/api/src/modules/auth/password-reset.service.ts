@@ -47,7 +47,8 @@ export async function requestPasswordReset(
     insertPasswordResetToken(scopedDb, workspace.id, user.id, tokenHash, expiresAt),
   );
 
-  const resetUrl = `${env.DASHBOARD_ORIGIN}/reset-password?token=${rawToken}`;
+  const appOrigin = env.DASHBOARD_ORIGIN.replace(/\/+$/, "");
+  const resetUrl = `${appOrigin}/reset-password?token=${rawToken}`;
   try {
     await emailSender.sendPasswordReset({ to: normalizedEmail, resetUrl });
   } catch {

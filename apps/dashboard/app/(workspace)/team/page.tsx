@@ -192,7 +192,8 @@ export default function TeamPage() {
           {revealedInviteUrl && (
             <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
               <p className="mb-1 font-medium text-amber-800">
-                Share this link with them - there&apos;s no automatic email yet, so this is the only way they&apos;ll get it.
+                You can also share this link directly with them — an invitation email is sent when email
+                delivery is configured.
               </p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 break-all">{revealedInviteUrl}</code>

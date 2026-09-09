@@ -113,7 +113,10 @@ export async function createOrResendInvitation(
     throw error;
   }
 
-  const inviteUrl = `${env.DASHBOARD_ORIGIN}/accept-invite?token=${rawToken}`;
+  // Strip any trailing slash from DASHBOARD_ORIGIN (deploy configs often
+  // set it with one) so the appended path never produces a double slash.
+  const appOrigin = env.DASHBOARD_ORIGIN.replace(/\/+$/, "");
+  const inviteUrl = `${appOrigin}/accept-invite?token=${rawToken}`;
 
   // Best-effort: a real provider (once one exists) failing to send
   // shouldn't block invitation creation - the link itself is already
