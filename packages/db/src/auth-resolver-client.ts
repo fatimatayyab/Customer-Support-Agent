@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { Pool } from "pg";
 import { dbEnv } from "./env.js";
-import { invitations, workspaceApiKeys, workspaceSignupInvites, workspaces } from "./schema/index.js";
+import { invitations, passwordResetTokens, workspaceApiKeys, workspaceSignupInvites, workspaces } from "./schema/index.js";
 
 // Connects as auth_resolver (BYPASSRLS, granted SELECT on nothing but a
 // few columns of workspaces, workspace_api_keys, and invitations - see
@@ -18,7 +18,7 @@ import { invitations, workspaceApiKeys, workspaceSignupInvites, workspaces } fro
 // resolution), a much smaller share of total query volume.
 const authResolverPool = new Pool({ connectionString: dbEnv.AUTH_RESOLVER_DATABASE_URL, max: 5 });
 const authResolverDb = drizzle(authResolverPool, {
-  schema: { workspaceApiKeys, workspaces, invitations, workspaceSignupInvites },
+  schema: { workspaceApiKeys, workspaces, invitations, workspaceSignupInvites, passwordResetTokens },
 });
 
 export async function findApiKeyByHash(keyHash: string) {
@@ -147,6 +147,28 @@ export async function findInvitationByTokenHash(tokenHash: string) {
     })
     .from(invitations)
     .where(eq(invitations.tokenHash, tokenHash))
+    .limit(1);
+
+  return row ?? null;
+}
+
+// Read-only resolution of a password-reset token (the public reset flow,
+// pre-tenant-context). Selected columns match migration 0029's grant
+// exactly - never the security boundary by itself (the atomic claim in
+// password-reset.repository.ts is), it just turns a raw token into the
+// workspace/user the reset operates on, and lets the preview validate
+// used/expired up front for a specific message.
+export async function findPasswordResetTokenByTokenHash(tokenHash: string) {
+  const [row] = await authResolverDb
+    .select({
+      id: passwordResetTokens.id,
+      workspaceId: passwordResetTokens.workspaceId,
+      userId: passwordResetTokens.userId,
+      expiresAt: passwordResetTokens.expiresAt,
+      usedAt: passwordResetTokens.usedAt,
+    })
+    .from(passwordResetTokens)
+    .where(eq(passwordResetTokens.tokenHash, tokenHash))
     .limit(1);
 
   return row ?? null;

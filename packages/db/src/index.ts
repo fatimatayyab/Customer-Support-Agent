@@ -5,6 +5,7 @@ export {
   findWorkspaceBySlug,
   findWorkspaceNameById,
   findInvitationByTokenHash,
+  findPasswordResetTokenByTokenHash,
   findWorkspaceSignupInviteByTokenHash,
   claimWorkspaceSignupInvite,
   touchApiKeyLastUsed,

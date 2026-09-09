@@ -46,6 +46,11 @@ export default function LoginPage() {
         <Field label="Password">
           <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
         </Field>
+        <div className="-mt-2 text-right text-xs">
+          <Link href="/forgot-password" className="text-slate-500 hover:text-slate-700">
+            Forgot password?
+          </Link>
+        </div>
         {error && <InlineError message={error} />}
         <Button type="submit" disabled={submitting}>
           {submitting ? "Logging in..." : "Log in"}

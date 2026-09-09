@@ -1077,3 +1077,49 @@ Both frontends are now on Vercel in team **buildIQ** (`build-iq4`, Hobby plan), 
 > fix to confirm against the live deployment. The Stage 1 go/no-go gate (`aiToolCallingEnabled`) has not yet
 > produced real signal because it has not been enabled for a workspace and run against live traffic — this
 > is a measurement-phase gap, not a missing-instrumentation one (see `docs/09`).
+
+## Milestone: Transactional email delivery (Resend) — invitations + password reset
+
+**Status:** ✅ Implemented & verified (unit/integration tests, real DB). The near-term "Team Invitation
+Emails" item from `docs/09` plus the missing password-reset half of Account & Team. No real send was
+exercised (no production Resend key), so live delivery + Resend domain verification remain manual setup.
+
+- **`EmailSender` seam stays the hard boundary** (`apps/api/src/modules/users/email-sender.ts`): the
+  interface gains a second method, `sendPasswordReset`, and both implementations must satisfy it.
+  `createEmailSender()` selects by `EMAIL_PROVIDER` — `resend` → `ResendEmailSender`, otherwise the
+  `NullEmailSender` no-op (copy-link invites stay the fallback; nothing depends on a real send).
+- **`ResendEmailSender`** (`resend-email-sender.ts`) — all Resend knowledge isolated here (SDK, HTML/text
+  templates, from-address). Reads `RESEND_API_KEY`/`EMAIL_FROM` via the constructor (from env); never
+  exposes the key; failures throw `EmailDeliveryError` for callers to swallow/log. Provider selection is
+  wired in `env.ts` (`EMAIL_PROVIDER=resend|none`, `RESEND_API_KEY`, `EMAIL_FROM`, with a `superRefine`
+  that fails boot if Resend is selected without credentials). A future `SesEmailSender` replaces only
+  this file + the `EMAIL_PROVIDER` value — invitation/password-reset business logic is untouched.
+- **Invitations** (`invitation.service.ts`): `createOrResendInvitation` now takes an injectable
+  `emailSender` (default = configured provider); it emails the invite link (`DASHBOARD_ORIGIN`/accept-invite)
+  best-effort (a send failure never blocks invitation creation — the link is still returned).
+- **Password reset** — new `password_reset_tokens` table (migration `0029`, auth_resolver granted a narrow
+  SELECT for pre-tenant-context token resolution, mirroring invitations):
+  - `POST /auth/forgot-password` (public) — **always 202, no account enumeration**; IP + per-email rate
+    limited; sends a single-use link on success only.
+  - `GET /reset-password?token=` — validates + previews (returns the account email; holder already has it).
+  - `POST /reset-password` — atomic single-use claim (conditional UPDATE), checks workspace/user still
+    active (mirrors `logIn`/`acceptInvitation`), re-hashes with Argon2. Token: 1h expiry, SHA-256 at rest,
+    base64url in the URL.
+  - Frontend: `/forgot-password` page (neutral "check your email"), `/reset-password` page (token preview +
+    new-password form, `useSearchParams` + `Suspense` like `/accept-invite`), and a "Forgot password?" link
+    on `/login`.
+- **Config/docs:** `.env.example` documents `EMAIL_PROVIDER`/`RESEND_API_KEY`/`EMAIL_FROM`; `docs/09`'s
+  near-term "Team Invitation Emails" item is the roadmap record (unchanged).
+- **Tests** (real DB for reset/invitation flows; Resend SDK mocked — no real emails):
+  - `email-sender.test.ts` — Resend construction with the API key, invitation/reset payloads (from/to/
+    subject/link), provider-failure → `EmailDeliveryError`, no key leakage, `NullEmailSender` no-op,
+    `createEmailSender` defaults to `NullEmailSender`.
+  - `password-reset.test.ts` — request no-enumeration (unknown email/workspace/disabled/suspended all
+    silent), preview valid/used/expired/invalid, reset consumes the token + makes the new password work
+    and the old one fail, provider failure never fails the request.
+  - `invitation-email.test.ts` — invite email sent with the correct link; invite creation still succeeds
+    when delivery fails.
+
+**Remaining manual setup before production email works:** create a Resend project/API key, verify a
+sending domain (DNS), set `EMAIL_PROVIDER=resend`/`RESEND_API_KEY`/`EMAIL_FROM` in Render, and confirm
+Render's `DASHBOARD_ORIGIN` is the real production dashboard URL (email links derive from it).

@@ -50,6 +50,29 @@ const envSchema = z.object({
   // catch-all branch still logs via Pino exactly as it does today, it
   // just has nowhere else to also report to.
   SENTRY_DSN: z.string().optional(),
+  // Transactional email. "none" = the NullEmailSender no-op (local/dev and
+  // tests - the dashboard keeps showing copy-link invites, and nothing
+  // depends on a real send). "resend" = the ResendEmailSender implementation;
+  // RESEND_API_KEY/EMAIL_FROM are then required (validated below). The
+  // EmailSender interface is the only thing application logic depends on, so
+  // swapping to SES later is a new implementation + this provider value.
+  EMAIL_PROVIDER: z.enum(["resend", "none"]).default("none"),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+});
+
+// Cross-field validation that the flat z.object shape can't express: a
+// Resend provider without its credentials is a config error that should
+// fail boot loudly, not a send-time surprise.
+envSchema.superRefine((values, ctx) => {
+  if (values.EMAIL_PROVIDER === "resend") {
+    if (!values.RESEND_API_KEY) {
+      ctx.addIssue({ code: "custom", path: ["RESEND_API_KEY"], message: "RESEND_API_KEY is required when EMAIL_PROVIDER=resend." });
+    }
+    if (!values.EMAIL_FROM) {
+      ctx.addIssue({ code: "custom", path: ["EMAIL_FROM"], message: "EMAIL_FROM is required when EMAIL_PROVIDER=resend." });
+    }
+  }
 });
 
 export const env = envSchema.parse(process.env);

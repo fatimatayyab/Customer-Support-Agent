@@ -5,7 +5,7 @@ import { signSessionToken } from "../auth/session-token.js";
 import { env } from "../../config/env.js";
 import { AppError, ForbiddenError, NotFoundError } from "../../errors.js";
 import { getWorkspaceById } from "../workspaces/workspace.repository.js";
-import { createEmailSender } from "./email-sender.js";
+import { createEmailSender, type EmailSender } from "./email-sender.js";
 import {
   getPendingInvitationByEmail,
   insertInvitation,
@@ -19,7 +19,7 @@ import { getUserByEmail, getUserById, insertUser } from "./user.repository.js";
 
 const INVITATION_EXPIRY_DAYS = 7;
 const UNIQUE_VIOLATION = "23505";
-const emailSender = createEmailSender();
+const defaultEmailSender = createEmailSender();
 
 // Same check as auth.service.ts's isUniqueSlugViolation, against a
 // different constraint (invitations_workspace_id_email_pending_unique).
@@ -41,6 +41,7 @@ export async function createOrResendInvitation(
   inviter: { id: string; role: WorkspaceRole },
   email: string,
   role: WorkspaceRole,
+  emailSender: EmailSender = defaultEmailSender,
 ): Promise<{ inviteUrl: string; expiresAt: Date }> {
   // Prevents a lower-privileged admin from minting a new Owner. Only an
   // existing Owner can grant the Owner role - deliberate, not yet
