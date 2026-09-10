@@ -6,6 +6,13 @@
 // receives broadcasts. Sending a reply/claiming/notes all go through
 // plain REST (lib/api.ts), same as every other dashboard action.
 
+export interface WireAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+}
+
 export interface WireMessage {
   id: string;
   conversationId: string;
@@ -14,6 +21,10 @@ export interface WireMessage {
   senderName: string | null;
   content: string;
   createdAt: string;
+  // Populated on any message that carries uploaded files - the agent
+  // console renders them from this. Always an array on the wire; absent
+  // only for messages persisted before attachments existed.
+  attachments?: WireAttachment[];
 }
 
 export type AgentConsoleEvent =

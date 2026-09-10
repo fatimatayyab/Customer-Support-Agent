@@ -1,4 +1,5 @@
 import { withWorkspaceContext } from "@csa/db";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { AppError, NotFoundError } from "../errors.js";
 import { getDefaultJobRunner, type JobRunner } from "../job-runner.js";
@@ -49,7 +50,14 @@ import {
   type EscalationReason,
 } from "../modules/conversations/conversation.repository.js";
 import { insertMessage, listMessages, type MessageMetadata } from "../modules/conversations/message.repository.js";
+import {
+  claimAttachmentsForMessage,
+  insertAttachment,
+  toAttachmentMetadata,
+  type AttachmentMetadata,
+} from "../modules/conversations/message-attachment.repository.js";
 import { getCustomerById, insertCustomer } from "../modules/customers/customer.repository.js";
+import type { ValidatedAttachment } from "../modules/conversations/message-attachment.config.js";
 import {
   CONTACT_LOOKUP_ACTION_NAME,
   countAiTriggeredLookups,
@@ -175,12 +183,16 @@ interface HandleCustomerMessageParams {
   // never a universal assumption). Absent for any other future channel.
   pageUrl?: string;
   pageTitle?: string;
+  // Ids of previously-uploaded (pending, message_id = NULL) attachments
+  // this message claims. Optional so a text-only message behaves exactly
+  // as before.
+  attachmentIds?: string[];
 }
 
 export async function handleCustomerMessage(params: HandleCustomerMessageParams, deps: OrchestratorDeps = {}) {
   const pageContext = params.pageUrl ? { url: params.pageUrl, title: params.pageTitle ?? "" } : undefined;
 
-  const { message, assignedUserId } = await withWorkspaceContext(params.workspaceId, async (scopedDb) => {
+  const { message, assignedUserId, attachments } = await withWorkspaceContext(params.workspaceId, async (scopedDb) => {
     const conversation = await getConversationById(scopedDb, params.workspaceId, params.conversationId);
     if (!conversation) {
       throw new NotFoundError("Conversation not found.");
@@ -194,14 +206,35 @@ export async function handleCustomerMessage(params: HandleCustomerMessageParams,
       ...(pageContext ? { metadata: { pageUrl: pageContext.url, pageTitle: pageContext.title } } : {}),
     });
 
-    return { message: inserted, assignedUserId: conversation.assignedUserId };
+    // Claim the attachments in the same transaction as the message
+    // insert: the conditional UPDATE only matches rows that are still
+    // unclaimed AND belong to this workspace + conversation, and a
+    // shortfall throws, rolling the message and every claim back
+    // together. The client can't attach a file it never uploaded, a file
+    // from another conversation, or an already-sent file.
+    const attachmentIds = params.attachmentIds ?? [];
+    const claimed = await claimAttachmentsForMessage(
+      scopedDb,
+      params.workspaceId,
+      params.conversationId,
+      inserted.id,
+      attachmentIds,
+    );
+    if (claimed.length !== attachmentIds.length) {
+      throw new AppError("One or more attachments could not be attached to this message.", 400);
+    }
+
+    return { message: inserted, assignedUserId: conversation.assignedUserId, attachments: claimed };
   });
 
   // Broadcasts to every subscriber including the sender's own
   // connection - the widget renders on this authoritative echo rather
   // than optimistically, so there's exactly one code path for "a
   // message appeared," not two that need to stay in sync.
-  publishToConversation(params.conversationId, { type: "message:receive", payload: message });
+  publishToConversation(params.conversationId, {
+    type: "message:receive",
+    payload: { ...message, attachments },
+  });
 
   // This is the actual mechanism behind "live takeover" (02_Product_Blueprint.md):
   // once a human has claimed the conversation, the AI stops auto-replying
@@ -221,6 +254,43 @@ export async function handleCustomerMessage(params: HandleCustomerMessageParams,
   }
 
   return message;
+}
+
+/**
+ * Widget-facing upload path (API-key authenticated). The file has already
+ * passed transport-level validation (multipart size cap) and
+ * validateAndNormalizeAttachment (type allowlist + magic-number check) in
+ * the route; this function is the "never trust client-provided ownership"
+ * half - the conversationId is client-supplied and verified against this
+ * workspace before any bytes are persisted. The blob is stored in
+ * Postgres, the platform's existing storage infrastructure (see
+ * message-attachments.ts's comment on why no separate blob provider
+ * exists). Returns the pending attachment's metadata; the widget holds
+ * the id until message:send claims it (message_id = NULL until then).
+ */
+export async function uploadMessageAttachment(
+  workspaceId: string,
+  conversationId: string,
+  file: ValidatedAttachment,
+): Promise<AttachmentMetadata> {
+  return withWorkspaceContext(workspaceId, async (scopedDb) => {
+    const conversation = await getConversationById(scopedDb, workspaceId, conversationId);
+    if (!conversation) {
+      throw new NotFoundError("Conversation not found.");
+    }
+    const id = randomUUID();
+    const inserted = await insertAttachment(scopedDb, {
+      id,
+      workspaceId,
+      conversationId,
+      filename: file.filename,
+      mimeType: file.mimeType,
+      size: file.size,
+      storageKey: `${workspaceId}/${id}`,
+      data: file.data,
+    });
+    return toAttachmentMetadata(inserted);
+  });
 }
 
 /**

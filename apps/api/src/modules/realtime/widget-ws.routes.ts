@@ -40,19 +40,34 @@ const initiateMessageSchema = z.object({
 const MAX_PAGE_URL_LENGTH = 2048;
 const MAX_PAGE_TITLE_LENGTH = 300;
 
-const sendMessageSchema = z.object({
-  type: z.literal("message:send"),
-  payload: z.object({
-    conversationId: z.string().uuid(),
-    content: z.string().min(1).max(4000),
-    // The website channel's context signal - optional and capped, never
-    // strictly URL-validated: this is a soft signal for the AI prompt,
-    // not a security-relevant field, so a malformed value should just be
-    // dropped downstream, not reject an otherwise-valid customer message.
-    pageUrl: z.string().max(MAX_PAGE_URL_LENGTH).optional(),
-    pageTitle: z.string().max(MAX_PAGE_TITLE_LENGTH).optional(),
-  }),
-});
+const sendMessageSchema = z
+  .object({
+    type: z.literal("message:send"),
+    payload: z.object({
+      conversationId: z.string().uuid(),
+      // Empty content is legal when the message carries attachments (a
+      // photo-only message), so the min is dropped from the field itself
+      // and enforced by the refine below - a bare empty message with no
+      // attachments is still rejected.
+      content: z.string().max(4000),
+      // Ids of pending (already-uploaded, message_id = NULL) attachments to
+      // claim onto this message. Cap mirrors MAX_ATTACHMENTS_PER_MESSAGE;
+      // each id is re-validated against workspace/conversation ownership and
+      // the unclaimed state server-side (claimAttachmentsForMessage), never
+      // trusted from the client.
+      attachmentIds: z.array(z.string().uuid()).max(6).optional(),
+      // The website channel's context signal - optional and capped, never
+      // strictly URL-validated: this is a soft signal for the AI prompt,
+      // not a security-relevant field, so a malformed value should just be
+      // dropped downstream, not reject an otherwise-valid customer message.
+      pageUrl: z.string().max(MAX_PAGE_URL_LENGTH).optional(),
+      pageTitle: z.string().max(MAX_PAGE_TITLE_LENGTH).optional(),
+    }),
+  })
+  .refine(
+    (message) => message.payload.content.trim().length > 0 || (message.payload.attachmentIds?.length ?? 0) > 0,
+    { message: "A message needs text or an attachment." },
+  );
 
 const typingMessageSchema = z.object({
   type: z.enum(["typing:start", "typing:stop"]),

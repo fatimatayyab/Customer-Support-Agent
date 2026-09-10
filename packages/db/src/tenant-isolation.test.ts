@@ -127,6 +127,23 @@ const fixtures: Record<string, FixtureBuilder> = {
     return must(message, "messages fixture: INSERT ... RETURNING produced no row.");
   },
 
+  message_attachments: async (scopedDb, workspaceId) => {
+    const conversation = await insertMinimalConversation(scopedDb, workspaceId);
+    const [attachment] = await scopedDb
+      .insert(schema.messageAttachments)
+      .values({
+        workspaceId,
+        conversationId: conversation.id,
+        filename: "fixture.png",
+        mimeType: "image/png",
+        size: 8,
+        storageKey: `${workspaceId}/fixture`,
+        data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      })
+      .returning();
+    return must(attachment, "message_attachments fixture: INSERT ... RETURNING produced no row.");
+  },
+
   conversation_notes: async (scopedDb, workspaceId) => {
     const conversation = await insertMinimalConversation(scopedDb, workspaceId);
     const user = await insertMinimalUser(scopedDb, workspaceId);
@@ -236,6 +253,20 @@ const fixtures: Record<string, FixtureBuilder> = {
       .returning();
     return must(invitation, "invitations fixture: INSERT ... RETURNING produced no row.");
   },
+
+  password_reset_tokens: async (scopedDb, workspaceId) => {
+    const user = await insertMinimalUser(scopedDb, workspaceId);
+    const [token] = await scopedDb
+      .insert(schema.passwordResetTokens)
+      .values({
+        workspaceId,
+        userId: user.id,
+        tokenHash: randomUUID(),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      })
+      .returning();
+    return must(token, "password_reset_tokens fixture: INSERT ... RETURNING produced no row.");
+  },
 };
 
 // workspace_platform_meta is deliberately excluded here even though it
@@ -259,9 +290,14 @@ const tenantTables = (Object.values(schema) as unknown[])
   .filter((table) => getTableConfig(table).name !== "workspace_platform_meta");
 
 describe("Row-Level Security: generic per-table tenant isolation", () => {
+  // TRUNCATE of every tenant table takes several seconds on a loaded
+  // Docker-on-Windows dev box (measured >10s under load) - the default
+  // 10s hook timeout is flaky here, so the reset gets an explicit,
+  // generous one. This only widens how long a DB reset may take; test
+  // assertions themselves keep their normal timeouts.
   afterEach(async () => {
     await resetDatabase();
-  });
+  }, 60_000);
 
   for (const table of tenantTables) {
     const tableName = getTableConfig(table).name;
@@ -317,7 +353,7 @@ describe("Row-Level Security: generic per-table tenant isolation", () => {
 describe("Row-Level Security: workspaces table", () => {
   afterEach(async () => {
     await resetDatabase();
-  });
+  }, 60_000);
 
   it("blocks workspace B from reading workspace A's own workspace row", async () => {
     const workspaceAId = randomUUID();

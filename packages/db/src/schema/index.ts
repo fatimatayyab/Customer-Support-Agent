@@ -4,6 +4,7 @@ export * from "./workspace-api-keys.js";
 export * from "./customers.js";
 export * from "./conversations.js";
 export * from "./messages.js";
+export * from "./message-attachments.js";
 export * from "./conversation-notes.js";
 export * from "./conversation-ratings.js";
 export * from "./conversation-escalation-contacts.js";

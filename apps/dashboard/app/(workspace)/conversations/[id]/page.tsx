@@ -14,7 +14,7 @@ import { PageSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 import { useSession } from "@/lib/session-context";
 import { ApiError, apiFetch } from "@/lib/api";
-import { AgentConsoleConnection, type WireMessage } from "@/lib/agent-console-ws-client";
+import { AgentConsoleConnection, type WireAttachment, type WireMessage } from "@/lib/agent-console-ws-client";
 
 interface ConversationDetail {
   id: string;
@@ -90,7 +90,64 @@ function formatMessageTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-function MessageBubble({ message }: { message: WireMessage }) {
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Renders a customer-attached file in the agent console. Images load
+// from the session-authenticated download route (the httpOnly cookie
+// rides along on the <img> request); other files link to the same route
+// for download. `conversationId` scopes the URL and the server still
+// re-verifies workspace + conversation ownership on every request.
+function MessageAttachments({
+  conversationId,
+  attachments,
+}: {
+  conversationId: string;
+  attachments: WireAttachment[];
+}) {
+  const base = `${API_URL}/conversations/${conversationId}/attachments`;
+  return (
+    <div className="mt-1.5 flex flex-col gap-1.5">
+      {attachments.map((attachment) =>
+        attachment.mimeType.startsWith("image/") ? (
+          <a
+            key={attachment.id}
+            href={`${base}/${attachment.id}/download`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block max-w-[240px] overflow-hidden rounded-lg bg-slate-200/60"
+            title={attachment.filename}
+          >
+            <img
+              src={`${base}/${attachment.id}/download`}
+              alt={attachment.filename}
+              className="block max-h-40 w-auto object-cover"
+            />
+          </a>
+        ) : (
+          <a
+            key={attachment.id}
+            href={`${base}/${attachment.id}/download`}
+            className="flex items-center gap-2 rounded-lg border border-current px-2.5 py-1.5 text-xs no-underline hover:underline"
+          >
+            <span aria-hidden="true">📄</span>
+            <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
+            <span className="opacity-70">{formatFileSize(attachment.size)}</span>
+          </a>
+        ),
+      )}
+    </div>
+  );
+}
+
+function MessageBubble({ conversationId, message }: { conversationId: string; message: WireMessage }) {
   const outbound = isOutboundSender(message.senderType);
   const isAutomated = message.senderType === "ai" || message.senderType === "system";
   const label = message.senderName ?? SENDER_LABELS[message.senderType];
@@ -109,7 +166,10 @@ function MessageBubble({ message }: { message: WireMessage }) {
             : "rounded-bl-sm bg-slate-100 text-slate-900",
         )}
       >
-        {message.content}
+        {message.content && <span>{message.content}</span>}
+        {message.attachments && message.attachments.length > 0 && (
+          <MessageAttachments conversationId={conversationId} attachments={message.attachments} />
+        )}
       </div>
       <span className="px-1 text-[11px] text-slate-400">{formatMessageTime(message.createdAt)}</span>
     </div>
@@ -413,7 +473,7 @@ export default function ConversationDetailPage() {
           <div ref={scrollRef} className="flex h-96 flex-col gap-3 overflow-y-auto p-3">
             {!connected && <p className="text-sm text-slate-500">{reconnecting ? "Reconnecting..." : "Connecting..."}</p>}
             {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+              <MessageBubble key={message.id} conversationId={conversationId} message={message} />
             ))}
             {typing && (
               <div className="flex items-center gap-1 self-end rounded-2xl rounded-br-sm bg-fill-muted px-3 py-2">

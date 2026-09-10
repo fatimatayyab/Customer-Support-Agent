@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { identifyWorkspace, type IdentifiedWorkspace } from "./api.js";
-import { ChatPanel } from "./ChatPanel.js";
+import { ChatPanel, type PendingAttachment } from "./ChatPanel.js";
 import type { WidgetConfig } from "./config.js";
 import { getStoredConversationId, getStoredCustomerId, storeConversation } from "./storage.js";
 import {
@@ -10,6 +10,24 @@ import {
   type IncomingEvent,
   type WireMessage,
 } from "./ws-client.js";
+
+// Client-side mirror of the server's own limits (message-attachment.config.ts).
+// Convenience only - the server re-validates every file; a mismatch here
+// just means the customer gets a friendlier, earlier error.
+const MAX_ATTACHMENT_SIZE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_ATTACHMENT_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "text/plain",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+const MAX_PENDING_ATTACHMENTS = 6;
+
+let nextAttachmentKey = 0;
 
 type IdentifyStatus =
   | { state: "loading" }
@@ -26,6 +44,9 @@ export function Widget({ config }: { config: WidgetConfig }) {
   const [typing, setTyping] = useState(false);
   const [rating, setRating] = useState<ConversationRatingValue | null>(null);
   const [contactSubmitted, setContactSubmitted] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const connectionRef = useRef<ChatConnection | null>(null);
 
   useEffect(() => {
@@ -101,20 +122,97 @@ export function Widget({ config }: { config: WidgetConfig }) {
   }, [open, config]);
 
   function handleSend(content: string) {
-    if (!conversationId) {
+    if (!conversationId || !connectionRef.current) {
       return;
     }
-    // The website channel's first context signal (docs/00/02's Chat
-    // Widget direction) - current page URL/title only, captured fresh at
-    // send time since a visitor can navigate mid-conversation. Not a
-    // template for how any other future channel supplies context.
-    connectionRef.current?.send("message:send", {
-      conversationId,
-      content,
-      pageUrl: window.location.href,
-      pageTitle: document.title,
-    });
+    const connection = connectionRef.current;
+
+    // Text-only path unchanged - no uploads to orchestrate, send straight
+    // over the socket exactly as before.
+    if (pendingAttachments.length === 0) {
+      connection.send("message:send", {
+        conversationId,
+        content,
+        pageUrl: window.location.href,
+        pageTitle: document.title,
+      });
+      return;
+    }
+
+    // Attachment path: upload any not-yet-uploaded files first, then send
+    // one message claiming every id. A file already uploaded (e.g. a retry
+    // after a send failure) is reused, never uploaded twice.
+    setUploading(true);
+    setSendError(null);
+    const toUpload = pendingAttachments.filter((attachment) => attachment.status !== "uploaded");
+    Promise.all(
+      toUpload.map((attachment) =>
+        connection
+          .uploadAttachment(conversationId!, attachment.file)
+          .then((metadata) => ({ key: attachment.key, metadata })),
+      ),
+    )
+      .then((results) => {
+        const byKey = new Map(results.map((result) => [result.key, result.metadata]));
+        const withIds = pendingAttachments.map((attachment) =>
+          byKey.has(attachment.key)
+            ? { ...attachment, status: "uploaded" as const, id: byKey.get(attachment.key)!.id }
+            : attachment,
+        );
+        connection.send("message:send", {
+          conversationId,
+          content,
+          attachmentIds: withIds.map((attachment) => attachment.id!).filter(Boolean),
+          pageUrl: window.location.href,
+          pageTitle: document.title,
+        });
+        setPendingAttachments([]);
+        setUploading(false);
+      })
+      .catch(() => {
+        setUploading(false);
+        setSendError("Couldn't upload one of the files - please try again.");
+      });
   }
+
+  function handleSelectFiles(files: File[]) {
+    const rejects: string[] = [];
+    const additions: PendingAttachment[] = [];
+    for (const file of files) {
+      const mimeType = file.type.toLowerCase();
+      if (!ALLOWED_ATTACHMENT_TYPES.has(mimeType)) {
+        rejects.push(`"${file.name}" isn't a supported file type`);
+        continue;
+      }
+      if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+        rejects.push(`"${file.name}" is larger than 5MB`);
+        continue;
+      }
+      if (pendingAttachments.length + additions.length >= MAX_PENDING_ATTACHMENTS) {
+        rejects.push(`You can attach up to ${MAX_PENDING_ATTACHMENTS} files`);
+        break;
+      }
+      additions.push({ key: `attachment-${nextAttachmentKey++}`, file, status: "pending" });
+    }
+    if (additions.length > 0) {
+      setPendingAttachments((previous) => [...previous, ...additions]);
+    }
+    if (rejects.length > 0) {
+      setSendError(rejects.join(" · "));
+    }
+  }
+
+  function handleRemoveAttachment(key: string) {
+    setPendingAttachments((previous) => previous.filter((attachment) => attachment.key !== key));
+  }
+
+  // Stable across renders so MessageAttachment's mint-once effect never
+  // re-fires because the callback identity changed. The connection is
+  // guaranteed present whenever messages exist to render.
+  const getAttachmentDownloadUrl = useCallback(
+    (attachmentId: string) => connectionRef.current!.createAttachmentDownloadUrl(attachmentId),
+    [],
+  );
 
   function handleTyping(isTyping: boolean) {
     if (!conversationId) {
@@ -201,6 +299,12 @@ export function Widget({ config }: { config: WidgetConfig }) {
         onSend={handleSend}
         onTyping={handleTyping}
         onClose={() => setOpen(false)}
+        pendingAttachments={pendingAttachments}
+        onSelectFiles={handleSelectFiles}
+        onRemoveAttachment={handleRemoveAttachment}
+        sendError={sendError}
+        uploading={uploading}
+        getAttachmentDownloadUrl={getAttachmentDownloadUrl}
       />
     </div>
   );

@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { messages, users, type ScopedDb } from "@csa/db";
 import { assertDefined } from "../../assert.js";
 import type { EscalationReason } from "./conversation.repository.js";
+import { listAttachmentsByConversation, type AttachmentMetadata } from "./message-attachment.repository.js";
 
 // Extensible on purpose - the provider/model/etc. fields are deliberately
 // generic (not "anthropicModel") so a future non-Claude provider doesn't
@@ -51,22 +52,31 @@ export async function insertMessage(scopedDb: ScopedDb, params: NewMessage) {
 // not "agent:") - used by both the Orchestrator's AI-context loading
 // and the Agent Console's history view, rather than two near-identical
 // functions. RLS on `users` composes correctly here since this always
-// runs inside the same workspace-scoped transaction.
+// runs inside the same workspace-scoped transaction. Attachments are
+// merged on as a single extra query per conversation (never per
+// message), metadata-only - the bytes stay out of history loads.
 export async function listMessages(scopedDb: ScopedDb, workspaceId: string, conversationId: string) {
-  return scopedDb
-    .select({
-      id: messages.id,
-      workspaceId: messages.workspaceId,
-      conversationId: messages.conversationId,
-      senderType: messages.senderType,
-      senderUserId: messages.senderUserId,
-      senderName: users.name,
-      content: messages.content,
-      metadata: messages.metadata,
-      createdAt: messages.createdAt,
-    })
-    .from(messages)
-    .leftJoin(users, eq(messages.senderUserId, users.id))
-    .where(and(eq(messages.conversationId, conversationId), eq(messages.workspaceId, workspaceId)))
-    .orderBy(asc(messages.createdAt));
+  const [rows, attachmentsByMessage] = await Promise.all([
+    scopedDb
+      .select({
+        id: messages.id,
+        workspaceId: messages.workspaceId,
+        conversationId: messages.conversationId,
+        senderType: messages.senderType,
+        senderUserId: messages.senderUserId,
+        senderName: users.name,
+        content: messages.content,
+        metadata: messages.metadata,
+        createdAt: messages.createdAt,
+      })
+      .from(messages)
+      .leftJoin(users, eq(messages.senderUserId, users.id))
+      .where(and(eq(messages.conversationId, conversationId), eq(messages.workspaceId, workspaceId)))
+      .orderBy(asc(messages.createdAt)),
+    listAttachmentsByConversation(scopedDb, workspaceId, conversationId),
+  ]);
+
+  return rows.map((row) => ({ ...row, attachments: attachmentsByMessage[row.id] ?? [] }));
 }
+
+export type { AttachmentMetadata };

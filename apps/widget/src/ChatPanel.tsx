@@ -1,7 +1,18 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { ConversationRatingValue, EscalationContactMethod, WireMessage } from "./ws-client.js";
+import type { ConversationRatingValue, EscalationContactMethod, WireAttachment, WireMessage } from "./ws-client.js";
 
 const TYPING_STOP_DELAY_MS = 2000;
+
+// A file selected in the composer but not yet sent. `status` tracks
+// whether it has already been uploaded (its id is then reused on retry
+// rather than re-uploaded); `key` is a local React key, unrelated to any
+// server id.
+export interface PendingAttachment {
+  key: string;
+  file: File;
+  status: "pending" | "uploaded";
+  id?: string;
+}
 
 interface ChatPanelProps {
   workspaceName: string;
@@ -27,6 +38,12 @@ interface ChatPanelProps {
   onSend: (content: string) => void;
   onTyping: (isTyping: boolean) => void;
   onClose: () => void;
+  pendingAttachments: PendingAttachment[];
+  onSelectFiles: (files: File[]) => void;
+  onRemoveAttachment: (key: string) => void;
+  sendError: string | null;
+  uploading: boolean;
+  getAttachmentDownloadUrl: (attachmentId: string) => Promise<string>;
 }
 
 // Inline, under the specific message that triggered escalation - not a
@@ -131,6 +148,106 @@ function EscalationContactOffer({
   );
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// A not-yet-sent file in the composer: image thumbnails use an object
+// URL created locally (no network), non-images show a compact file chip.
+// The object URL is revoked on unmount so a long chat session doesn't
+// leak blobs.
+function PendingAttachmentChip({ attachment, onRemove }: { attachment: PendingAttachment; onRemove: () => void }) {
+  const isImage = attachment.file.type.startsWith("image/");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isImage) {
+      return;
+    }
+    const url = URL.createObjectURL(attachment.file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [attachment.file, isImage]);
+
+  return (
+    <div class="attachment-chip">
+      {previewUrl ? (
+        <img class="attachment-chip-thumb" src={previewUrl} alt="" />
+      ) : (
+        <span class="attachment-chip-icon" aria-hidden="true">
+          📄
+        </span>
+      )}
+      <span class="attachment-chip-meta">
+        <span class="attachment-chip-name">{attachment.file.name}</span>
+        <span class="attachment-chip-size">{formatFileSize(attachment.file.size)}</span>
+      </span>
+      <button type="button" class="attachment-chip-remove" onClick={onRemove} aria-label="Remove file">
+        ×
+      </button>
+    </div>
+  );
+}
+
+// A sent message's attachment. Images load through a freshly minted
+// download ticket (browsers can't send the widget's X-API-Key header on
+// an <img> request, so the ticket rides in the URL - see
+// ws-client.ts's createAttachmentDownloadUrl). Non-images render as a
+// clickable file card that downloads the original.
+function MessageAttachment({
+  attachment,
+  getDownloadUrl,
+}: {
+  attachment: WireAttachment;
+  getDownloadUrl: (attachmentId: string) => Promise<string>;
+}) {
+  const isImage = attachment.mimeType.startsWith("image/");
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDownloadUrl(attachment.id)
+      .then((resolved) => {
+        if (!cancelled) {
+          setUrl(resolved);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFailed(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment.id, getDownloadUrl]);
+
+  if (isImage) {
+    return (
+      <a href={url ?? "#"} target="_blank" rel="noopener noreferrer" class="message-attachment-image">
+        {url ? <img src={url} alt={attachment.filename} /> : <span class="message-attachment-loading">Loading image...</span>}
+      </a>
+    );
+  }
+
+  return (
+    <a href={url ?? "#"} target="_blank" rel="noopener noreferrer" class="message-attachment-file">
+      <span class="attachment-chip-icon" aria-hidden="true">
+        📄
+      </span>
+      <span class="message-attachment-file-name">{attachment.filename}</span>
+      <span class="message-attachment-file-size">{formatFileSize(attachment.size)}</span>
+    </a>
+  );
+}
+
 export function ChatPanel({
   workspaceName,
   avatarUrl,
@@ -148,6 +265,12 @@ export function ChatPanel({
   onSend,
   onTyping,
   onClose,
+  pendingAttachments,
+  onSelectFiles,
+  onRemoveAttachment,
+  sendError,
+  uploading,
+  getAttachmentDownloadUrl,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const typingTimeoutRef = useRef<number | null>(null);
@@ -169,7 +292,7 @@ export function ChatPanel({
   function handleSubmit(event: Event) {
     event.preventDefault();
     const content = draft.trim();
-    if (!content) {
+    if (!content && pendingAttachments.length === 0) {
       return;
     }
     onSend(content);
@@ -179,6 +302,17 @@ export function ChatPanel({
       window.clearTimeout(typingTimeoutRef.current);
     }
   }
+
+  function handleFileInput(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    input.value = "";
+    if (files.length > 0) {
+      onSelectFiles(files);
+    }
+  }
+
+  const composerLocked = !connected || !conversationInitiated || uploading;
 
   return (
     <div class="panel">
@@ -207,8 +341,21 @@ export function ChatPanel({
         )}
         {greetingMessage && <div class="message message-ai">{greetingMessage}</div>}
         {messages.map((message) => (
-          <div key={message.id}>
-            <div class={`message message-${message.senderType}`}>{message.content}</div>
+          <div key={message.id} class="message-wrap">
+            <div class={`message message-${message.senderType}`}>
+              {message.content && <div class="message-text">{message.content}</div>}
+              {message.attachments && message.attachments.length > 0 && (
+                <div class="message-attachments">
+                  {message.attachments.map((attachment) => (
+                    <MessageAttachment
+                      key={attachment.id}
+                      attachment={attachment}
+                      getDownloadUrl={getAttachmentDownloadUrl}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
             {message.metadata?.escalated && (
               <EscalationContactOffer contactSubmitted={contactSubmitted} onSubmit={onSubmitContact} />
             )}
@@ -247,15 +394,42 @@ export function ChatPanel({
         </div>
       )}
 
+      {pendingAttachments.length > 0 && (
+        <div class="attachment-preview-row">
+          {pendingAttachments.map((attachment) => (
+            <PendingAttachmentChip
+              key={attachment.key}
+              attachment={attachment}
+              onRemove={() => onRemoveAttachment(attachment.key)}
+            />
+          ))}
+        </div>
+      )}
+      {sendError && <div class="panel-send-error">{sendError}</div>}
+
       <form class="panel-input" onSubmit={handleSubmit}>
+        <label class="panel-attach" title="Attach a file">
+          <input
+            type="file"
+            multiple
+            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,.doc,.docx"
+            hidden
+            onChange={handleFileInput}
+            disabled={composerLocked || pendingAttachments.length >= 6}
+          />
+          📎
+        </label>
         <input
           value={draft}
           onInput={(event) => handleInput((event.target as HTMLInputElement).value)}
           placeholder="Type a message..."
-          disabled={!connected || !conversationInitiated}
+          disabled={composerLocked}
         />
-        <button type="submit" disabled={!connected || !conversationInitiated || !draft.trim()}>
-          Send
+        <button
+          type="submit"
+          disabled={composerLocked || (!draft.trim() && pendingAttachments.length === 0)}
+        >
+          {uploading ? "Sending..." : "Send"}
         </button>
       </form>
     </div>

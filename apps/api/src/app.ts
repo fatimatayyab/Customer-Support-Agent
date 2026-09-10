@@ -13,6 +13,7 @@ import { authRoutes } from "./modules/auth/auth.routes.js";
 import { conversationEscalationContactRoutes } from "./modules/conversations/conversation-escalation-contact.routes.js";
 import { conversationRatingRoutes } from "./modules/conversations/conversation-rating.routes.js";
 import { conversationRoutes } from "./modules/conversations/conversation.routes.js";
+import { messageAttachmentRoutes } from "./modules/conversations/message-attachment.routes.js";
 import { integrationRoutes } from "./modules/integrations/integration.routes.js";
 import { knowledgeRoutes } from "./modules/knowledge/knowledge.routes.js";
 import { agentConsoleRealtimeRoutes } from "./modules/realtime/agent-console-ws.routes.js";
@@ -121,6 +122,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.register(conversationRoutes);
   app.register(conversationRatingRoutes);
   app.register(conversationEscalationContactRoutes);
+  app.register(messageAttachmentRoutes);
   app.register(agentConsoleRealtimeRoutes);
   app.register(integrationRoutes);
   app.register(userRoutes);

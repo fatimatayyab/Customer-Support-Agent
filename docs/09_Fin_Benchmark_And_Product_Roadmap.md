@@ -122,12 +122,15 @@ accelerate any V2/V3 item. The V2/V3 tiers below remain exactly as classified, s
   improved where appropriate; concrete scope is a future decision.
 
 **Customer Chat UX** — the next customer-facing improvements:
-- **Customer message attachments** — sending attachments from the widget is active near-term work.
+- **Customer message attachments** — ✅ **implemented** (see `docs/07`'s "Customer Chat UX — message
+  attachments" milestone; built on `message_attachments`, the deferred `messages` attachments column's
+  successor).
 - **Emoji / rich-text input** — active near-term work.
-- **Image / file sending** — included where appropriate, on the same attachment surface.
-- **Attachment architecture should let the AI understand supported attachment types in the future** — a
-  design constraint: attachments are not storage-only. Shape the message/attachment model (building on
-  `docs/07`'s deferred `attachments` column) so a later phase can pass supported types to the AI.
+- **Image / file sending** — ✅ **implemented** on the same attachment surface as the attachments item above.
+- **Attachment architecture should let the AI understand supported attachment types in the future** — ✅
+  **boundary established** (`message_attachments` carries `id`/`filename`/`mimeType`/`size`/`storageKey`
+  per message; the wire shape is the roadmap's exact metadata set). AI vision / PDF extraction / RAG on
+  attachments are deliberately **not** built — the metadata seam is in place for a later phase.
 - **Voice input/messages are a future consideration only** — not an immediate commitment. The existing
   voice/omnichannel positioning (the RESERVED `channel-integration` Operator) is unchanged.
 

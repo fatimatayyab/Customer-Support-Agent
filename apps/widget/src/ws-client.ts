@@ -1,6 +1,16 @@
 import type { WidgetConfig } from "./config.js";
 import { getStoredConversationId, getStoredCustomerId } from "./storage.js";
 
+// The metadata a message carries for each of its attachments - exactly
+// the { id, filename, mimeType, size } shape the roadmap's attachment
+// architecture specifies (docs/09), plus no bytes/storage internals.
+export interface WireAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+}
+
 export interface WireMessage {
   id: string;
   conversationId: string;
@@ -13,6 +23,11 @@ export interface WireMessage {
   // provider/confidence fields, just a different subset - see
   // message.repository.ts's MessageMetadata.
   metadata?: { escalated?: boolean; escalationReason?: string } | null;
+  // Populated on any message that carries uploaded files - the widget
+  // renders image previews (via a minted download ticket) or file cards
+  // from these. Always an array on the wire; absent only for older
+  // messages persisted before attachments existed.
+  attachments?: WireAttachment[];
 }
 
 export type EscalationContactMethod = "email" | "phone";
@@ -214,6 +229,45 @@ export class ChatConnection {
     if (!response.ok) {
       throw new Error("Could not submit contact details.");
     }
+  }
+
+  // Multipart upload of a customer attachment, before the message that
+  // will claim it is sent. Sends a real `File` in a FormData body and
+  // deliberately lets the browser set the multipart boundary - a manual
+  // Content-Type header would break the boundary encoding. The server
+  // validates size/type and returns the attachment's metadata; the id is
+  // what message:send later claims.
+  async uploadAttachment(conversationId: string, file: File): Promise<WireAttachment> {
+    const formData = new FormData();
+    formData.append("conversationId", conversationId);
+    formData.append("file", file, file.name);
+    const response = await fetch(`${this.config.apiUrl}/widget/attachments`, {
+      method: "POST",
+      headers: { "X-API-Key": this.config.apiKey },
+      body: formData,
+    });
+    if (!response.ok) {
+      throw new Error("Could not upload file.");
+    }
+    const body = (await response.json()) as { attachment: WireAttachment };
+    return body.attachment;
+  }
+
+  // Exchanges the API key for a short-lived download ticket, then builds
+  // the ticket-bearing URL an <img>/download link can actually load -
+  // browsers can't send an X-API-Key header on an <img> request, so the
+  // ticket in the query string is the only authenticatable path (the
+  // same handshake shape POST /widget/session uses for the WebSocket).
+  async createAttachmentDownloadUrl(attachmentId: string): Promise<string> {
+    const response = await fetch(`${this.config.apiUrl}/widget/attachments/${attachmentId}/download-ticket`, {
+      method: "POST",
+      headers: { "X-API-Key": this.config.apiKey },
+    });
+    if (!response.ok) {
+      throw new Error("Could not load file.");
+    }
+    const body = (await response.json()) as { ticket: string };
+    return `${this.config.apiUrl}/widget/attachments/${attachmentId}/download?ticket=${encodeURIComponent(body.ticket)}`;
   }
 
   close(): void {

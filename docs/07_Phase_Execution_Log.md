@@ -1123,3 +1123,64 @@ exercised (no production Resend key), so live delivery + Resend domain verificat
 **Remaining manual setup before production email works:** create a Resend project/API key, verify a
 sending domain (DNS), set `EMAIL_PROVIDER=resend`/`RESEND_API_KEY`/`EMAIL_FROM` in Render, and confirm
 Render's `DASHBOARD_ORIGIN` is the real production dashboard URL (email links derive from it).
+
+---
+
+## Milestone: Customer Chat UX — message attachments
+
+**Status:** ✅ Implemented & verified (unit/integration tests against the real DB, plus live curl + real
+WebSocket round-trips against the running dev API/DB). Closes `docs/09`'s "Customer message attachments"
+and "Image / file sending" near-term items, and establishes the attachment-metadata boundary for future
+AI processing without implementing any AI consumption of attachments.
+
+- **Schema: `message_attachments`** (migration `0030`) — `id`, `workspace_id`, `conversation_id`,
+  `message_id` (nullable: a "pending" upload claimed by message:send), `filename`, `mime_type`, `size`,
+  `storage_key`, `data` (bytea), `created_at`. RLS policy + `workspace_id`/`conversation_id`/`message_id`
+  indexes, registered in `tenant-isolation.test.ts`'s generic fixture loop. The blob is stored in
+  Postgres bytea — the platform's *existing* storage infrastructure; no blob provider exists in this
+  stack (see workspace-widget-settings.ts's own note), so none was introduced. `storage_key` is the
+  logical key (`{workspaceId}/{attachmentId}`) a future object-store migration would move the bytes to.
+- **Validation** (`message-attachment.config.ts`) — server-side allowlist (`image/jpeg|png|gif|webp`,
+  `application/pdf`, `text/plain`, doc/docx) + magic-number sniffing: a file *declared* as an
+  image/PDF whose bytes don't match is rejected, and the sniffed type wins over the declared one. 5MB
+  cap (also enforced by the multipart plugin), 6 attachments/message cap, filename sanitized for display
+  only. Client-side mirror in the widget is convenience-only; the server re-validates everything.
+- **Upload** — `POST /widget/attachments` (API-key auth, workspace-keyed rate limit, 30/hour), the
+  conversationId is client-supplied but verified against the requesting workspace before any bytes are
+  persisted. Returns `{ id, filename, mimeType, size }`.
+- **Claim on send** — `message:send` gains optional `attachmentIds` (capped at 6). `handleCustomerMessage`
+  claims them in the same transaction as the message insert via a single conditional UPDATE
+  (`message_id IS NULL AND workspace_id = ? AND conversation_id = ?`); a count mismatch throws and rolls
+  the message + every claim back together. The broadcast payload carries each attachment's metadata.
+  Empty-content messages are now legal *only when* they carry attachments (Zod refine).
+- **Serving** — two authenticated paths: the widget's `<img>` can't send an X-API-Key header, so
+  `POST /widget/attachments/:id/download-ticket` mints a short-lived (15m) JWT bound to
+  `{workspaceId, attachmentId}` (same pattern as the WS ticket), and `GET /widget/attachments/:id/download?ticket=`
+  serves the bytes — still workspace-scoped via RLS, so a ticket minted for one workspace can't read
+  another's file. The dashboard is same-origin with the session cookie, so `GET /conversations/:id/
+  attachments/:attachmentId/download` serves directly (session-auth), verifying the attachment belongs to
+  that conversation too. Both set the allowlisted `Content-Type`, `X-Content-Type-Options: nosniff`,
+  `inline` for raster images only, `attachment` for everything else.
+- **Widget** — composer paperclip → client-side type/size check → pending preview chips (object-URL
+  thumbnails for images, file cards otherwise, removable) → upload-on-send (already-uploaded files are
+  reused, never re-uploaded on retry) → authoritative echo renders image previews (lazy ticket-minted
+  URLs) or file cards. Upload/send failures surface inline; the text-only path is byte-for-byte unchanged.
+- **Agent console** — message bubbles render image thumbnails / file cards from the session-authenticated
+  download URL.
+- **Security notes** — `message_id`-null claims are race-free (conditional UPDATE, not check-then-write);
+  cross-workspace conversation upload, cross-workspace ticket minting, wrong-conversation dashboard
+  download, and already-claimed re-claims all verified as 404/400. No SVG/HTML allowed (stored-XSS
+  surface); served bytes always carry `nosniff` and a server-chosen Content-Type. `listMessages` now
+  merges attachment metadata in one extra query per conversation; bytes are never selected on history reads.
+- **Verified** — db suite 25/25, API suite green (66/66 orchestrator incl. the new 8 attachment-flow
+  tests, 15/15 config/ticket unit tests, all pre-existing files re-run). Live curl: upload 201, size/type
+  rejections 413/400, cross-workspace 404s, ticket download byte-identical with correct headers; live WS:
+  `conversation:initiated` history carries `attachments`, `message:send`+claim broadcast the metadata,
+  bogus-id send is rejected and the message rolled back. Widget UI itself was verified by build +
+  typecheck only (no Playwright coverage exists for the widget yet).
+- **Deployment/migration** — run `pnpm db:migrate` (and `pnpm --filter @csa/db test:db:setup` for the
+  test DB) to apply migration `0030`. No new env vars, no new services, no new dependencies (Drizzle
+  custom `bytea` type added in `packages/db/src/schema/bytea-type.ts`).
+- **Test-env fix bundled in** — `.env.test` now pins `EMAIL_PROVIDER=none`; the dev `.env` sets
+  `EMAIL_PROVIDER=resend`, which was silently making `email-sender.test.ts`'s "defaults to NullEmailSender"
+  case fail on this machine (pre-existing, unrelated to this milestone).

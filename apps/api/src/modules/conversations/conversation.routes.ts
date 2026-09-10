@@ -17,6 +17,8 @@ import { listConversationEscalations } from "./conversation-escalation.repositor
 import { listConversationNotes } from "./conversation-note.repository.js";
 import { getConversationDetail, listConversations, type ConversationStatus } from "./conversation.repository.js";
 import { listMessages } from "./message.repository.js";
+import { getAttachmentById } from "./message-attachment.repository.js";
+import { INLINE_RENDERABLE_TYPES } from "./message-attachment.config.js";
 
 const CONVERSATION_STATUSES: ConversationStatus[] = [
   "open",
@@ -138,4 +140,32 @@ export async function conversationRoutes(app: FastifyInstance) {
     );
     reply.send({ result });
   });
+
+  // Dashboard side of attachment delivery. Unlike the widget's download
+  // route, no ticket is needed here: the agent console is same-origin
+  // with the dashboard, so the httpOnly session cookie rides along on
+  // <img>/download requests automatically. Scoped to a specific
+  // conversation in addition to the workspace, so this endpoint honestly
+  // matches the path it's served at.
+  app.get<{ Params: { id: string; attachmentId: string } }>(
+    "/conversations/:id/attachments/:attachmentId/download",
+    async (request, reply) => {
+      const attachment = await withWorkspaceContext(request.workspaceId!, (scopedDb) =>
+        getAttachmentById(scopedDb, request.workspaceId!, request.params.attachmentId),
+      );
+      if (!attachment || attachment.conversationId !== request.params.id) {
+        throw new NotFoundError("Attachment not found.");
+      }
+      const inline = INLINE_RENDERABLE_TYPES.has(attachment.mimeType);
+      reply
+        .header("Content-Type", attachment.mimeType)
+        .header("X-Content-Type-Options", "nosniff")
+        .header(
+          "Content-Disposition",
+          inline ? "inline" : `attachment; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`,
+        )
+        .header("Cache-Control", "private, max-age=600");
+      return reply.send(attachment.data);
+    },
+  );
 }
