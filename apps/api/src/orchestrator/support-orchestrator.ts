@@ -334,6 +334,22 @@ async function generateAiReply(
       return;
     }
 
+    // An attachment-only message carries no text to embed or reason over
+    // (message:send only allows empty content when attachments are
+    // present). AI vision / document extraction is deliberately not built
+    // yet (docs/09), so there is nothing to ground a reply on - escalate
+    // with a detail that tells the agent why, rather than letting the
+    // blank content flow into retrieval.
+    if (customerMessage.trim().length === 0) {
+      await escalateNoRelevantKnowledge(
+        workspaceId,
+        conversationId,
+        "Customer sent an attachment with no accompanying text; the AI cannot read attachments yet.",
+        deps,
+      );
+      return;
+    }
+
     const { workspaceName, history } = await withWorkspaceContext(workspaceId, async (scopedDb) => {
       const workspace = await getWorkspaceById(scopedDb, workspaceId);
       if (!workspace) {

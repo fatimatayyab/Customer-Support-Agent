@@ -303,7 +303,11 @@
   background: white;
 }
 
-.panel-input input {
+/* Direct child only, deliberately: the composer's file input lives inside
+   .panel-attach, and `all: unset` here would otherwise reset its display
+   to inline and override the [hidden] attribute (author styles beat the
+   UA [hidden] rule), leaking the native "No file chosen" control. */
+.panel-input > input {
   all: unset;
   flex: 1;
   border: 1px solid #cbd5e1;

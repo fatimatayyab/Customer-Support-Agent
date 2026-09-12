@@ -3,11 +3,14 @@ import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AppError } from "../errors.js";
 import { claimConversation, handleCustomerMessage, initiateConversation, uploadMessageAttachment } from "./support-orchestrator.js";
+import { getConversationById } from "../modules/conversations/conversation.repository.js";
 import { listMessages } from "../modules/conversations/message.repository.js";
+import { NO_RELEVANT_KNOWLEDGE_MESSAGE, PROVIDER_ERROR_MESSAGE } from "../modules/ai/prompts/fallback-messages.js";
 import { createConversation, createUser, createWorkspace } from "../test-support/fixtures.js";
 import { resetDatabase } from "../test-support/reset-database.js";
 import { SynchronousJobRunner } from "../job-runner.js";
 import { FakeAiProvider } from "../test-support/fake-ai-provider.js";
+import { FakeEmbeddingProvider } from "../test-support/fake-embedding-provider.js";
 
 // A real PNG so the upload path's magic-number check passes.
 const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
@@ -202,6 +205,36 @@ describe("handleCustomerMessage with attachments", () => {
     );
     const customerMessage = history.find((message) => message.senderType === "customer");
     expect(customerMessage?.attachments).toEqual([]);
+  });
+
+  it("escalates an attachment-only message as no_relevant_knowledge, never ai_provider_error", async () => {
+    const workspace = await createWorkspace();
+    const conversation = await createConversation(workspace.id);
+
+    const attachment = await uploadMessageAttachment(workspace.id, conversation.id, FILE);
+    // Unclaimed conversation so the AI branch actually runs. The AI
+    // provider is deliberately left unconfigured - it throws if called,
+    // so a regression that stops short-circuiting blank content would
+    // surface as an ai_provider_error escalation and fail below.
+    const aiProvider = new FakeAiProvider();
+    await handleCustomerMessage(
+      { workspaceId: workspace.id, conversationId: conversation.id, content: "", attachmentIds: [attachment.id] },
+      { jobRunner: new SynchronousJobRunner(), aiProvider, embeddingProvider: new FakeEmbeddingProvider() },
+    );
+
+    const conversationAfter = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      getConversationById(scopedDb, workspace.id, conversation.id),
+    );
+    const metadata = conversationAfter?.metadata as { escalation?: { reason: string } } | null;
+    expect(metadata?.escalation?.reason).toBe("no_relevant_knowledge");
+    expect(aiProvider.generateReplyInputs).toEqual([]);
+
+    const history = await withWorkspaceContext(workspace.id, (scopedDb) =>
+      listMessages(scopedDb, workspace.id, conversation.id),
+    );
+    const contents = history.map((message) => message.content);
+    expect(contents).toContain(NO_RELEVANT_KNOWLEDGE_MESSAGE);
+    expect(contents).not.toContain(PROVIDER_ERROR_MESSAGE);
   });
 });
 

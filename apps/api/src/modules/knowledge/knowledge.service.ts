@@ -262,6 +262,14 @@ export async function searchKnowledge(
   limit: number = DEFAULT_SEARCH_LIMIT,
   embeddingProvider: EmbeddingProvider = getDefaultEmbeddingProvider(),
 ): Promise<SimilarChunk[]> {
+  // A blank query has no embedding and cannot match anything, so short-
+  // circuit rather than sending it to the provider - Voyage rejects empty
+  // input outright (400 "Input cannot contain empty strings"). Reachable
+  // in practice: a customer message is legal with empty content when it
+  // carries attachments, and that same content flows into retrieval.
+  if (query.trim().length === 0) {
+    return [];
+  }
   const queryEmbedding = await embeddingProvider.embedQuery(query);
   return withWorkspaceContext(workspaceId, (scopedDb) =>
     searchSimilarChunks(scopedDb, workspaceId, queryEmbedding, limit),
